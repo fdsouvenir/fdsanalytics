@@ -218,9 +218,9 @@ export class ResponseGenerator {
       return [];
     }
 
-    // Convert last 6 messages to Gemini format
+    // Convert last 10 messages to Gemini format (5 conversation turns)
     return context.relevantMessages
-      .slice(-6)
+      .slice(-10)
       .map(msg => ({
         role: msg.role === 'user' ? 'user' : 'model',
         content: msg.content

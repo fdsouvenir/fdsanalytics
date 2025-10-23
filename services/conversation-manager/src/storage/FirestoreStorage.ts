@@ -175,13 +175,16 @@ export class FirestoreStorage {
 
   /**
    * Generate unique conversation ID
+   * Replaces forward slashes to avoid Firestore path separator conflicts
    */
   static generateConversationId(
     tenantId: string,
     threadId: string,
     timestamp: Date
   ): string {
-    return `${tenantId}-${threadId}-${timestamp.getTime()}`;
+    // Replace / with _ to avoid Firestore collection/document path issues
+    const sanitizedThreadId = threadId.replace(/\//g, '_');
+    return `${tenantId}-${sanitizedThreadId}-${timestamp.getTime()}`;
   }
 
   /**
