@@ -157,6 +157,20 @@ export class ResponseGenerator {
   private buildContext(input: ResponseGeneratorInput): string {
     const parts: string[] = [];
 
+    // CONVERSATION HISTORY FIRST - Make it prominent for context retention
+    if (input.context && input.context.relevantMessages && input.context.relevantMessages.length > 0) {
+      parts.push(`=== CONVERSATION HISTORY ===`);
+      const messages = input.context.relevantMessages.slice(-6); // Last 6 messages
+      messages.forEach(msg => {
+        parts.push(`${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`);
+      });
+      parts.push(`User: ${input.userMessage}`);
+      parts.push(`=== END CONVERSATION ===\n`);
+    }
+
+    // Add context instruction
+    parts.push(`Instructions: Read the conversation history above to understand context. If the current message refers to previous context (like timeframes, categories, or items), use that information to complete the query. If context is unclear, ask for clarification.\n`);
+
     // Add tenant info
     parts.push(`Business: ${input.tenantConfig.businessName}`);
     parts.push(`Timezone: ${input.tenantConfig.timezone}`);
@@ -180,20 +194,6 @@ export class ResponseGenerator {
     parts.push(`  * "Top 5 items" → orderBy: {field: "metric_value", direction: "desc"}, limit: 5, groupBy: ["item"]`);
     parts.push(`  * "Highest sales day" → orderBy: {field: "metric_value", direction: "desc"}, limit: 1, groupBy: ["date"]`);
     parts.push(`  * "Show by category" → groupBy: ["category"], orderBy: {field: "metric_value", direction: "desc"}`);
-
-    // Add conversation summary if available
-    if (input.context && input.context.summary) {
-      parts.push(`\nConversation summary: ${input.context.summary}`);
-    }
-
-    // Add recent messages
-    if (input.context && input.context.relevantMessages && input.context.relevantMessages.length > 0) {
-      const recentMessages = input.context.relevantMessages
-        .slice(-3)
-        .map(msg => `${msg.role}: ${msg.content}`)
-        .join('\n');
-      parts.push(`\nRecent messages:\n${recentMessages}`);
-    }
 
     return parts.join('\n');
   }
