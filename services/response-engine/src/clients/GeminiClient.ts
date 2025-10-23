@@ -26,6 +26,16 @@ interface GenerateResponseOutput {
   };
 }
 
+interface GenerateChatResponseInput {
+  userMessage: string;
+  systemInstruction: string;
+  conversationHistory: Array<{
+    role: 'user' | 'model';
+    content: string;
+  }>;
+  availableFunctions?: GeminiFunction[];
+}
+
 /**
  * GeminiClient - Interface to Google Gemini Pro API
  *
@@ -129,6 +139,99 @@ export class GeminiClient {
 
       throw new Error(`Gemini API error: ${error.message}`);
     }
+  }
+
+  /**
+   * Generate response using chat session with system instructions and history
+   */
+  async generateChatResponse(input: GenerateChatResponseInput): Promise<GenerateResponseOutput> {
+    await this.initialize();
+
+    if (!this.genAI) {
+      throw new Error('Gemini not initialized');
+    }
+
+    try {
+      // Convert conversation history to Gemini format
+      const history = this.convertToGeminiHistory(input.conversationHistory);
+
+      // Prepare function declarations
+      const functionDeclarations: FunctionDeclaration[] = (input.availableFunctions || []).map(fn => ({
+        name: fn.name,
+        description: fn.description,
+        parameters: fn.parameters
+      }));
+
+      // Create model with system instruction and tools
+      const modelConfig: any = {
+        model: this.modelName,
+        systemInstruction: {
+          parts: [{ text: input.systemInstruction }]
+        }
+      };
+
+      if (functionDeclarations.length > 0) {
+        modelConfig.tools = [{ functionDeclarations }];
+      }
+
+      const model = this.genAI.getGenerativeModel(modelConfig);
+
+      // Start chat with history
+      const chat = model.startChat({
+        history: history
+      });
+
+      // Send new message
+      const result = await chat.sendMessage(input.userMessage);
+      const response = result.response;
+
+      // Check for function call
+      const candidates = response.candidates || [];
+      if (candidates.length > 0 && candidates[0].content?.parts) {
+        for (const part of candidates[0].content.parts) {
+          if (part.functionCall) {
+            return {
+              functionCall: {
+                name: part.functionCall.name,
+                args: part.functionCall.args as Record<string, any>
+              }
+            };
+          }
+        }
+      }
+
+      // No function call, return text
+      return {
+        text: response.text?.() || ''
+      };
+    } catch (error: any) {
+      console.error('Gemini chat API error', { error: error.message });
+
+      // Handle rate limits
+      if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
+        console.warn('Gemini rate limit hit, waiting and retrying...');
+        await this.sleep(10000);
+        return await this.generateChatResponse(input); // Retry once
+      }
+
+      throw new Error(`Gemini chat API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Convert conversation history to Gemini format
+   */
+  private convertToGeminiHistory(history: Array<{
+    role: 'user' | 'model';
+    content: string;
+  }>): Array<{
+    role: string;
+    parts: Array<{ text: string }>;
+  }> {
+    return history.map(msg => ({
+      role: msg.role,
+      parts: [{ text: msg.content }]
+    }));
   }
 
   /**

@@ -72,13 +72,15 @@ export class ResponseGenerator {
       // Step 1: Get MCP tool definitions
       const availableTools = await this.getMCPToolDefinitions();
 
-      // Step 2: Build context for Gemini
-      const contextStr = this.buildContext(input);
+      // Step 2: Build system instruction and conversation history
+      const systemInstruction = this.buildSystemInstruction(input);
+      const conversationHistory = this.buildConversationHistory(input.context);
 
-      // Step 3: Ask Gemini which tool(s) to call
-      const geminiResponse = await this.geminiClient.generateResponse({
+      // Step 3: Ask Gemini which tool(s) to call using chat API
+      const geminiResponse = await this.geminiClient.generateChatResponse({
         userMessage: input.userMessage,
-        context: contextStr,
+        systemInstruction: systemInstruction,
+        conversationHistory: conversationHistory,
         availableFunctions: availableTools
       });
 
@@ -152,50 +154,62 @@ export class ResponseGenerator {
   }
 
   /**
-   * Build context string for Gemini
+   * Build system instruction for Gemini (persistent context)
    */
-  private buildContext(input: ResponseGeneratorInput): string {
+  private buildSystemInstruction(input: ResponseGeneratorInput): string {
     const parts: string[] = [];
 
-    // CONVERSATION HISTORY FIRST - Make it prominent for context retention
-    if (input.context && input.context.relevantMessages && input.context.relevantMessages.length > 0) {
-      parts.push(`=== CONVERSATION HISTORY ===`);
-      const messages = input.context.relevantMessages.slice(-6); // Last 6 messages
-      messages.forEach(msg => {
-        parts.push(`${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`);
-      });
-      parts.push(`User: ${input.userMessage}`);
-      parts.push(`=== END CONVERSATION ===\n`);
-    }
-
-    // Add context instruction
-    parts.push(`Instructions: Read the conversation history above to understand context. If the current message refers to previous context (like timeframes, categories, or items), use that information to complete the query. If context is unclear, ask for clarification.\n`);
-
-    // Add tenant info
-    parts.push(`Business: ${input.tenantConfig.businessName}`);
-    parts.push(`Timezone: ${input.tenantConfig.timezone}`);
+    // Business context
+    parts.push(`You are an analytics assistant for ${input.tenantConfig.businessName}.`);
+    parts.push(`Business timezone: ${input.tenantConfig.timezone}`);
     parts.push(`Currency: ${input.tenantConfig.currency}`);
+    parts.push(`Current date and time: ${input.currentDateTime.toISOString()}`);
 
-    // Add current date/time
-    parts.push(`Current date: ${input.currentDateTime.toISOString()}`);
-
-    // Add available categories
+    // Available categories
     if (input.availableCategories && input.availableCategories.length > 0) {
-      parts.push(`Available categories: ${input.availableCategories.join(', ')}`);
+      parts.push(`\nAvailable product categories: ${input.availableCategories.join(', ')}`);
     }
 
-    // Add ordering instructions for Gemini
-    parts.push(`\nIMPORTANT - Extracting ordering and ranking from queries:`);
-    parts.push(`- When user asks for "top N", "highest", "best", "most": Set orderBy.direction to "desc" and limit to N`);
-    parts.push(`- When user asks for "bottom N", "lowest", "least", "worst": Set orderBy.direction to "asc" and limit to N`);
-    parts.push(`- When user asks for "day with highest/lowest": Set groupBy to ["date"], orderBy accordingly, and limit to 1`);
-    parts.push(`- Always set orderBy.field to "metric_value" when ordering by the metric being queried`);
+    // Context retention instructions
+    parts.push(`\nContext Retention:`);
+    parts.push(`- Read conversation history to understand context`);
+    parts.push(`- If current message refers to previous timeframes, categories, or metrics, use that information`);
+    parts.push(`- If user says "totals" after asking about a timeframe, use that timeframe`);
+    parts.push(`- If user says "compare to X" after asking about Y, apply same parameters to both`);
+    parts.push(`- Only ask for clarification if context is truly missing or ambiguous`);
+
+    // Ordering and ranking instructions
+    parts.push(`\nExtracting Ordering and Ranking:`);
+    parts.push(`- "top N", "highest", "best", "most" → orderBy.direction="desc", limit=N`);
+    parts.push(`- "bottom N", "lowest", "least", "worst" → orderBy.direction="asc", limit=N`);
+    parts.push(`- "day with highest/lowest" → groupBy=["date"], orderBy accordingly, limit=1`);
+    parts.push(`- orderBy.field should typically be "metric_value"`);
     parts.push(`- Examples:`);
     parts.push(`  * "Top 5 items" → orderBy: {field: "metric_value", direction: "desc"}, limit: 5, groupBy: ["item"]`);
     parts.push(`  * "Highest sales day" → orderBy: {field: "metric_value", direction: "desc"}, limit: 1, groupBy: ["date"]`);
     parts.push(`  * "Show by category" → groupBy: ["category"], orderBy: {field: "metric_value", direction: "desc"}`);
 
     return parts.join('\n');
+  }
+
+  /**
+   * Build conversation history array from context
+   */
+  private buildConversationHistory(context: ConversationContext): Array<{
+    role: 'user' | 'model';
+    content: string;
+  }> {
+    if (!context || !context.relevantMessages || context.relevantMessages.length === 0) {
+      return [];
+    }
+
+    // Convert last 6 messages to Gemini format
+    return context.relevantMessages
+      .slice(-6)
+      .map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        content: msg.content
+      }));
   }
 
   /**
