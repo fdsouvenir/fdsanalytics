@@ -200,8 +200,21 @@ function parseGoogleChatWebhook(body: any): ChatMessageRequest | null {
     // Extract IDs
     const workspaceId = space?.name || 'default';
     const userId = user?.name || 'anonymous';
-    const threadId = message.thread?.name || message.name;
     const messageId = message.name || `msg_${Date.now()}`;
+
+    // Determine threadId based on space type
+    // For DM (1:1 direct messages), use space name as conversation identifier
+    // For ROOM/SPACE, use thread name for proper threading
+    let threadId: string;
+    const spaceType = space?.type;
+
+    if (spaceType === 'DM') {
+      // In DMs, all messages are part of one continuous conversation
+      threadId = space.name;
+    } else {
+      // In Spaces/Rooms, use thread for proper threading support
+      threadId = message.thread?.name || message.name;
+    }
 
     return {
       workspaceId,

@@ -2,7 +2,7 @@
  * ConversationManager - Main orchestrator for conversation context and storage
  */
 
-import { BigQueryStorage, ConversationMessage } from '../storage/BigQueryStorage';
+import { FirestoreStorage, ConversationMessage } from '../storage/FirestoreStorage';
 import { ContextSummarizer, ConversationContext } from './ContextSummarizer';
 import { GeminiClient } from '../gemini/GeminiClient';
 import { config } from '../config/config';
@@ -26,13 +26,13 @@ export interface StoreMessageRequest {
 }
 
 export class ConversationManager {
-  private storage: BigQueryStorage;
+  private storage: FirestoreStorage;
   private summarizer: ContextSummarizer;
   private geminiClient: GeminiClient;
   private initialized: boolean = false;
 
   constructor() {
-    this.storage = new BigQueryStorage();
+    this.storage = new FirestoreStorage();
     this.geminiClient = new GeminiClient();
     this.summarizer = new ContextSummarizer(this.geminiClient);
   }
@@ -110,7 +110,7 @@ export class ConversationManager {
     const tenantId = config.defaultTenantId;
 
     const message: ConversationMessage = {
-      conversationId: BigQueryStorage.generateConversationId(
+      conversationId: FirestoreStorage.generateConversationId(
         tenantId,
         request.threadId,
         timestamp
