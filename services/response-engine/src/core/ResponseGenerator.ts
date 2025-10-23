@@ -170,9 +170,20 @@ export class ResponseGenerator {
       parts.push(`Available categories: ${input.availableCategories.join(', ')}`);
     }
 
+    // Add ordering instructions for Gemini
+    parts.push(`\nIMPORTANT - Extracting ordering and ranking from queries:`);
+    parts.push(`- When user asks for "top N", "highest", "best", "most": Set orderBy.direction to "desc" and limit to N`);
+    parts.push(`- When user asks for "bottom N", "lowest", "least", "worst": Set orderBy.direction to "asc" and limit to N`);
+    parts.push(`- When user asks for "day with highest/lowest": Set groupBy to ["date"], orderBy accordingly, and limit to 1`);
+    parts.push(`- Always set orderBy.field to "metric_value" when ordering by the metric being queried`);
+    parts.push(`- Examples:`);
+    parts.push(`  * "Top 5 items" → orderBy: {field: "metric_value", direction: "desc"}, limit: 5, groupBy: ["item"]`);
+    parts.push(`  * "Highest sales day" → orderBy: {field: "metric_value", direction: "desc"}, limit: 1, groupBy: ["date"]`);
+    parts.push(`  * "Show by category" → groupBy: ["category"], orderBy: {field: "metric_value", direction: "desc"}`);
+
     // Add conversation summary if available
     if (input.context && input.context.summary) {
-      parts.push(`Conversation summary: ${input.context.summary}`);
+      parts.push(`\nConversation summary: ${input.context.summary}`);
     }
 
     // Add recent messages
@@ -181,7 +192,7 @@ export class ResponseGenerator {
         .slice(-3)
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
-      parts.push(`Recent messages:\n${recentMessages}`);
+      parts.push(`\nRecent messages:\n${recentMessages}`);
     }
 
     return parts.join('\n');
