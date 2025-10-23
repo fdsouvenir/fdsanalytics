@@ -80,6 +80,15 @@ export class ResponseEngine {
         this.config.maxConversationHistory
       );
 
+      // DEBUG: Check what context was retrieved
+      console.log('DEBUG: Context from Conversation Manager:', JSON.stringify({
+        userId: request.userId,
+        threadId: request.threadId || request.messageId,
+        hasContext: !!context,
+        messageCount: context?.relevantMessages?.length || 0,
+        messages: context?.relevantMessages?.slice(-3) || []
+      }, null, 2));
+
       // Step 3: Get available categories from MCP
       const availableCategories = await this.getAvailableCategories();
 

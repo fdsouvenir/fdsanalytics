@@ -76,6 +76,21 @@ export class ResponseGenerator {
       const systemInstruction = this.buildSystemInstruction(input);
       const conversationHistory = this.buildConversationHistory(input.context);
 
+      // DEBUG: Check conversation context and history
+      console.log('DEBUG: Conversation context check:', JSON.stringify({
+        hasContext: !!input.context,
+        hasRelevantMessages: !!(input.context?.relevantMessages),
+        messageCount: input.context?.relevantMessages?.length || 0,
+        messages: input.context?.relevantMessages || [],
+        currentMessage: input.userMessage
+      }, null, 2));
+
+      console.log('DEBUG: Converted history for Gemini:', JSON.stringify({
+        historyLength: conversationHistory.length,
+        history: conversationHistory,
+        systemInstructionLength: systemInstruction.length
+      }, null, 2));
+
       // Step 3: Ask Gemini which tool(s) to call using chat API
       const geminiResponse = await this.geminiClient.generateChatResponse({
         userMessage: input.userMessage,
