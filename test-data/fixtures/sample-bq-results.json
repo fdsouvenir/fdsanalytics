@@ -1,0 +1,89 @@
+{
+  "simple_sales_query": {
+    "rows": [
+      {
+        "total": 5456.66
+      }
+    ],
+    "totalRows": 1
+  },
+  "category_sales_query": {
+    "rows": [
+      {
+        "category": "(Beer)",
+        "total": 1234.56,
+        "quantity": 50
+      },
+      {
+        "category": "(Sushi)",
+        "total": 2345.67,
+        "quantity": 85
+      },
+      {
+        "category": "(Food)",
+        "total": 1876.43,
+        "quantity": 62
+      }
+    ],
+    "totalRows": 3
+  },
+  "comparison_query": {
+    "rows": [
+      {
+        "date": "2025-10-22",
+        "sales": 5456.66
+      },
+      {
+        "date": "2025-10-21",
+        "sales": 4823.45
+      }
+    ],
+    "totalRows": 2
+  },
+  "trend_query": {
+    "rows": [
+      {
+        "category": "(Beer)",
+        "current_week": 8645.23,
+        "last_week": 7832.11,
+        "percent_change": 10.38
+      },
+      {
+        "category": "(Sushi)",
+        "current_week": 16432.89,
+        "last_week": 14876.45,
+        "percent_change": 10.46
+      },
+      {
+        "category": "(Food)",
+        "current_week": 13145.67,
+        "last_week": 15234.22,
+        "percent_change": -13.71
+      }
+    ],
+    "totalRows": 3
+  },
+  "forecast_query": {
+    "rows": [
+      {
+        "date": "2025-10-23",
+        "predicted_sales": 5234.12,
+        "lower_bound": 4800.00,
+        "upper_bound": 5650.00
+      },
+      {
+        "date": "2025-10-24",
+        "predicted_sales": 5456.78,
+        "lower_bound": 5000.00,
+        "upper_bound": 5900.00
+      },
+      {
+        "date": "2025-10-25",
+        "predicted_sales": 6789.45,
+        "lower_bound": 6200.00,
+        "upper_bound": 7350.00
+      }
+    ],
+    "totalRows": 7
+  }
+}

@@ -1,0 +1,614 @@
+# Claude Code Subagents Configuration
+# Restaurant Analytics System v1.0
+#
+# This file defines specialized subagents for building the system incrementally.
+# Each agent has specific expertise and scope to ensure high-quality, focused development.
+
+subagents:
+  # =========================================================================
+  # Agent 1: Foundation Builder
+  # =========================================================================
+  foundation:
+    name: Foundation Builder
+    description: |
+      Builds core shared libraries that all other services depend on.
+      Must be built first before any other agents can proceed.
+    
+    expertise: |
+      - TypeScript type definitions and interfaces
+      - Shared utility functions (logging, retry, date/currency formatting)
+      - Error class hierarchies
+      - Constants and enums
+      - No external service dependencies
+    
+    responsibilities:
+      - Implement all types from docs/02-api-contracts.md
+      - Create structured JSON logger
+      - Implement retry logic with exponential backoff
+      - Create error classes (AppError, UserInputError, TransientError)
+      - Date and currency utilities
+      - Write unit tests for all utilities (100% coverage goal)
+    
+    paths:
+      - shared/**
+    
+    key_files:
+      - shared/types/*.types.ts
+      - shared/utils/logger.ts
+      - shared/utils/retry.ts
+      - shared/errors/*.ts
+      - shared/__tests__/**
+    
+    dependencies: []
+    
+    output_criteria:
+      - All types match docs/02-api-contracts.md exactly
+      - Logger outputs structured JSON
+      - Retry logic handles exponential backoff correctly
+      - All unit tests pass
+      - 100% test coverage for utilities
+      - TypeScript compiles with no errors
+      - Package can be imported by other services
+    
+    reference_docs:
+      - docs/02-api-contracts.md (Section 11: Logging Standards)
+      - docs/05-error-handling.md (Section 3: Retry Logic)
+      - docs/08-project-structure.md (Section 6: Shared Code)
+
+  # =========================================================================
+  # Agent 2: Data Layer Specialist
+  # =========================================================================
+  data:
+    name: Data Layer Specialist
+    description: |
+      Implements the MCP Server that provides secure, validated access to BigQuery.
+      Focuses on SQL injection prevention through stored procedures and validation.
+    
+    expertise: |
+      - BigQuery stored procedures and SQL
+      - MCP (Model Context Protocol) implementation
+      - Parameter validation against live data
+      - Query optimization and performance
+      - Security: SQL injection prevention
+    
+    responsibilities:
+      - Create BigQuery stored procedures (query_metrics, get_forecast, get_anomalies)
+      - Implement MCP protocol server
+      - Implement query_analytics, get_forecast, get_anomalies tools
+      - Validate categories against actual BQ data (not hardcoded lists)
+      - Handle query timeouts and errors gracefully
+      - Write unit tests for validation logic
+      - Write integration tests against test BQ dataset
+    
+    paths:
+      - services/mcp-server/**
+      - sql/**
+    
+    key_files:
+      - services/mcp-server/src/tools/queryAnalytics.tool.ts
+      - services/mcp-server/src/bigquery/Validator.ts
+      - services/mcp-server/src/bigquery/StoredProcedures.ts
+      - sql/stored-procedures/query_metrics.sql
+      - sql/stored-procedures/get_forecast.sql
+      - sql/stored-procedures/get_anomalies.sql
+    
+    dependencies: [foundation]
+    
+    must_use:
+      - Existing BQ project: fdsanalytics
+      - Existing datasets: restaurant_analytics, insights
+      - Existing tables: reports, metrics, category_trends, top_items, daily_forecast, daily_comparisons
+    
+    must_create:
+      - New dataset: ingestion
+      - New tables: ingestion_log, backfill_jobs (schemas in docs/03-data-models.md)
+      - Stored procedures in restaurant_analytics dataset
+    
+    security_requirements:
+      - NEVER build SQL strings with user input
+      - ALWAYS use parameterized queries via stored procedures
+      - Validate categories by querying BQ (SELECT DISTINCT primary_category FROM metrics)
+      - Return specific error codes (INVALID_CATEGORY, QUERY_TIMEOUT, etc.)
+    
+    output_criteria:
+      - MCP server responds to tools/list and tools/call
+      - All 3 tools implemented and tested
+      - Stored procedures deployed to BigQuery
+      - Category validation works against live data
+      - Query timeouts set to 30s
+      - Integration tests pass against test dataset
+      - No SQL injection vulnerabilities
+    
+    reference_docs:
+      - docs/02-api-contracts.md (Section 5: MCP Server Interface)
+      - docs/03-data-models.md (Complete BigQuery schemas)
+      - docs/05-error-handling.md (Error codes and handling)
+      - docs/PROJECT_INFO.md (Existing BQ setup)
+
+  # =========================================================================
+  # Agent 3: Conversation Manager Specialist
+  # =========================================================================
+  conversation:
+    name: Conversation Manager Specialist
+    description: |
+      Manages chat history storage and context extraction for multi-turn conversations.
+      Uses Gemini Flash for intelligent context summarization.
+    
+    expertise: |
+      - BigQuery for message storage
+      - Gemini Flash API integration
+      - Context extraction and summarization
+      - Thread-based conversation grouping
+      - Efficient history retrieval
+    
+    responsibilities:
+      - Implement message storage in chat_history.conversations table
+      - Implement context extraction (last 10 messages)
+      - Implement Gemini Flash-based summarization
+      - Handle empty/new conversations gracefully
+      - Implement TTL (90-day auto-delete via BQ partition expiration)
+      - Write unit tests with mocked Gemini
+      - Write integration tests with test BQ dataset
+    
+    paths:
+      - services/conversation-manager/**
+    
+    key_files:
+      - services/conversation-manager/src/core/ConversationManager.ts
+      - services/conversation-manager/src/core/ContextSummarizer.ts
+      - services/conversation-manager/src/storage/BigQueryStorage.ts
+      - services/conversation-manager/src/index.ts
+    
+    dependencies: [foundation, data]
+    
+    gemini_usage:
+      model: gemini-2.5-flash
+      purpose: Summarize conversation history into relevant context
+      prompt_pattern: |
+        "Summarize the following conversation, focusing on what's relevant 
+        to the user's current query: {current_message}
+        
+        Recent messages:
+        {message_history}"
+    
+    output_criteria:
+      - Messages stored in chat_history.conversations
+      - Context extraction returns last 10 messages max
+      - Summarization produces concise, relevant context
+      - Handles new conversations (empty history)
+      - Service runs as Cloud Run with health check
+      - Unit tests pass (Gemini mocked)
+      - Integration tests pass
+    
+    reference_docs:
+      - docs/02-api-contracts.md (Section 3: Conversation Manager Interface)
+      - docs/03-data-models.md (Section 4: chat_history Dataset)
+      - docs/04-configuration-schema.md (Gemini API configuration)
+
+  # =========================================================================
+  # Agent 4: Ingestion Pipeline Specialist
+  # =========================================================================
+  ingestion:
+    name: Ingestion Pipeline Specialist
+    description: |
+      Builds the Gmail-to-BigQuery data pipeline for PMIX reports.
+      Handles OAuth, PDF parsing, idempotency, and backfill orchestration.
+    
+    expertise: |
+      - Gmail API and OAuth 2.0 flows
+      - PDF parsing (existing PmixParser from PROJECT_INFO.md)
+      - BigQuery MERGE upsert pattern (from existing codebase)
+      - Idempotency and duplicate prevention
+      - Progress tracking and notifications
+      - Cloud Function (Pub/Sub trigger)
+    
+    responsibilities:
+      - Implement Gmail API client with OAuth
+      - Implement or adapt existing PMIX parser
+      - Implement MERGE upsert to reports and metrics tables
+      - Implement ingestion logging (ingestion_log table)
+      - Implement backfill service with progress tracking
+      - Implement idempotency checks (skip already processed messages)
+      - Send progress notifications to Google Chat
+      - Write unit tests for parser and logic
+      - Write integration tests for end-to-end flow
+    
+    paths:
+      - services/gmail-ingestion/**
+    
+    key_files:
+      - services/gmail-ingestion/src/core/IngestionService.ts
+      - services/gmail-ingestion/src/core/BackfillService.ts
+      - services/gmail-ingestion/src/gmail/GmailClient.ts
+      - services/gmail-ingestion/src/parsers/PmixParser.ts
+      - services/gmail-ingestion/src/bigquery/IngestionLogger.ts
+      - services/gmail-ingestion/src/index.ts (Cloud Function entry)
+    
+    dependencies: [foundation, data]
+    
+    reuse_existing:
+      - PMIX parser from current codebase (if available)
+      - MERGE upsert pattern from PROJECT_INFO.md
+      - Reference: docs/PROJECT_INFO.md for existing implementation
+    
+    idempotency_pattern: |
+      BEFORE processing each PDF:
+      1. Check ingestion_log for source_id (Gmail message_id)
+      2. If exists with status='success', skip
+      3. If exists with status='failed' and retry_count < 3, retry
+      4. Process PDF and log result
+    
+    output_criteria:
+      - Gmail client can search and download attachments
+      - PMIX parser extracts data correctly
+      - MERGE upserts prevent duplicates
+      - Ingestion logged to ingestion_log table
+      - Backfill tracks progress in backfill_jobs table
+      - Progress notifications sent to Google Chat
+      - Cloud Function triggers daily via Cloud Scheduler
+      - Unit tests pass
+      - Integration tests with sample PDFs pass
+    
+    reference_docs:
+      - docs/02-api-contracts.md (Section 8: Gmail Ingestion Interface)
+      - docs/03-data-models.md (Section 5: ingestion Dataset)
+      - docs/PROJECT_INFO.md (Existing PMIX parser and MERGE pattern)
+
+  # =========================================================================
+  # Agent 5: Orchestration Specialist
+  # =========================================================================
+  orchestration:
+    name: Orchestration Specialist
+    description: |
+      Builds the Response Engine - the main service that ties everything together.
+      Handles user queries, calls MCP/Conversation services, generates responses with Gemini Pro.
+    
+    expertise: |
+      - Service orchestration and integration
+      - Gemini Pro API for response generation
+      - Google Chat API for sending messages
+      - Chart generation via quickchart.io
+      - Fallback strategies for degraded services
+      - Response formatting for Google Chat
+    
+    responsibilities:
+      - Implement main message handler
+      - Implement tenant resolver (hardcoded 'senso-sushi' for v1)
+      - Integrate with MCP Server (call query_analytics tool)
+      - Integrate with Conversation Manager (get context)
+      - Implement response generation with Gemini Pro
+      - Implement chart generation (quickchart.io)
+      - Implement fallbacks (text-only if charts fail)
+      - Implement /setup command handler (stub for v1)
+      - Implement /status command handler (stub for v1)
+      - Write comprehensive unit tests
+      - Write integration tests
+    
+    paths:
+      - services/response-engine/**
+    
+    key_files:
+      - services/response-engine/src/core/ResponseEngine.ts
+      - services/response-engine/src/core/ResponseGenerator.ts
+      - services/response-engine/src/core/TenantResolver.ts
+      - services/response-engine/src/core/ChartBuilder.ts
+      - services/response-engine/src/clients/MCPClient.ts
+      - services/response-engine/src/clients/ConversationClient.ts
+      - services/response-engine/src/handlers/chatMessage.handler.ts
+      - services/response-engine/src/index.ts
+    
+    dependencies: [foundation, data, conversation]
+    
+    gemini_usage:
+      model: gemini-2.5-pro
+      purpose: Generate natural language responses with function calling
+      function_calling: |
+        - Calls MCP tools via function calling
+        - Decides which tools to call based on user query
+        - Synthesizes data into conversational response
+        - Determines when charts are helpful
+    
+    tenant_config_v1: |
+      Hardcoded for single tenant:
+      {
+        tenantId: 'senso-sushi',
+        businessName: 'Senso Sushi',
+        bqProject: 'fdsanalytics',
+        bqDataset: 'restaurant_analytics',
+        timezone: 'America/Chicago',
+        currency: 'USD'
+      }
+    
+    fallback_strategy: |
+      - If chart generation fails → return text-only response
+      - If MCP call fails → retry 3x, then error message
+      - If Conversation Manager fails → proceed without context
+      - If Gemini Pro fails → retry with backoff, then generic error
+    
+    output_criteria:
+      - Handles natural language queries correctly
+      - Calls MCP tools appropriately
+      - Generates responses with Gemini Pro
+      - Creates charts when data is suitable
+      - Formats responses for Google Chat (text + cards)
+      - Handles errors gracefully with user-friendly messages
+      - /setup and /status stubs respond appropriately
+      - Service runs as Cloud Run with health check
+      - Unit tests pass (external services mocked)
+      - Integration tests pass
+    
+    reference_docs:
+      - docs/01-system-requirements.md (User stories and flows)
+      - docs/02-api-contracts.md (Section 1: Response Engine Interface)
+      - docs/05-error-handling.md (Fallback strategies)
+      - docs/04-configuration-schema.md (Tenant config)
+
+  # =========================================================================
+  # Agent 6: Testing Specialist
+  # =========================================================================
+  testing:
+    name: Testing Specialist
+    description: |
+      Writes comprehensive tests for all components.
+      Ensures 80%+ coverage and catches bugs before deployment.
+    
+    expertise: |
+      - Jest testing framework
+      - Mocking strategies (services, APIs, databases)
+      - Test fixtures and sample data
+      - Integration testing
+      - E2E testing with Google Chat
+      - Coverage reporting
+    
+    responsibilities:
+      - Write unit tests for all services (80%+ coverage)
+      - Write integration tests for critical flows
+      - Write E2E test stubs for user journeys
+      - Create test fixtures (mock messages, sample data)
+      - Create mock implementations for external services
+      - Setup test BQ dataset with sample data
+      - Configure Jest with coverage thresholds
+      - Generate coverage reports
+    
+    paths:
+      - "**/__tests__/**"
+      - test-data/**
+      - jest.config.js
+      - "**/*.test.ts"
+    
+    key_files:
+      - jest.config.js
+      - test-data/mock-reports.ts
+      - test-data/mock-metrics.ts
+      - test-data/pdfs/*.pdf
+      - services/*/src/__tests__/**
+    
+    dependencies: [foundation, data, conversation, ingestion, orchestration]
+    
+    test_categories:
+      unit_tests:
+        - All business logic functions
+        - Utilities (logger, retry, date/currency)
+        - Error classes
+        - Validators
+        coverage_goal: 90%
+      
+      integration_tests:
+        - Response Engine → MCP Server → BigQuery flow
+        - Gmail Ingestion → Parser → BigQuery flow
+        - Conversation Manager storage and retrieval
+        coverage_goal: 75%
+      
+      e2e_tests:
+        - Complete user query flow
+        - Setup and backfill flow
+        - Multi-turn conversation
+        coverage_goal: "Critical paths only"
+    
+    mocking_strategy:
+      - Mock Gemini API responses (Flash and Pro)
+      - Mock Gmail API (return sample messages)
+      - Mock BigQuery for unit tests (use in-memory data)
+      - Use test BigQuery dataset for integration tests
+      - Mock quickchart.io (return fake URLs)
+    
+    test_data_needed:
+      - Sample PMIX PDFs (valid, malformed, empty)
+      - Mock BigQuery rows (reports, metrics)
+      - Mock conversation history
+      - Mock Google Chat messages
+      - Mock Gemini responses
+    
+    output_criteria:
+      - All unit tests pass
+      - All integration tests pass
+      - E2E test stubs created
+      - Coverage >80% overall
+      - Coverage >90% for business logic
+      - Coverage report generated
+      - Test fixtures documented
+      - No flaky tests
+    
+    reference_docs:
+      - docs/06-testing-strategy.md (Complete testing guide)
+      - docs/03-data-models.md (Sample data structures)
+      - docs/02-api-contracts.md (Interfaces to test)
+
+  # =========================================================================
+  # Agent 7: DevOps Specialist
+  # =========================================================================
+  devops:
+    name: DevOps Specialist
+    description: |
+      Creates deployment automation, CI/CD pipelines, and infrastructure scripts.
+      Makes deployment a single command operation.
+    
+    expertise: |
+      - GCP Cloud Run and Cloud Functions deployment
+      - Docker and containerization
+      - GitHub Actions CI/CD
+      - Bash scripting
+      - IAM and service accounts
+      - Cloud Scheduler configuration
+      - Infrastructure as code
+    
+    responsibilities:
+      - Create Dockerfiles for all services
+      - Create docker-compose.yml for local development
+      - Create deployment scripts (deploy-all.sh, per-service scripts)
+      - Create setup scripts (service accounts, IAM, BQ datasets)
+      - Create GitHub Actions workflows (test, deploy, lint)
+      - Create utility scripts (logs, rollback, test-ingestion)
+      - Configure Cloud Scheduler for daily ingestion
+      - Document deployment process
+    
+    paths:
+      - scripts/**
+      - .github/workflows/**
+      - "**/Dockerfile"
+      - docker-compose.yml
+      - .env.*.template
+    
+    key_files:
+      - scripts/deploy/deploy-all.sh
+      - scripts/deploy/deploy-response-engine.sh
+      - scripts/deploy/deploy-mcp-server.sh
+      - scripts/deploy/deploy-conversation-manager.sh
+      - scripts/deploy/deploy-gmail-ingestion.sh
+      - scripts/setup/create-service-accounts.sh
+      - scripts/setup/grant-iam-permissions.sh
+      - scripts/setup/deploy-stored-procedures.sh
+      - .github/workflows/deploy.yml
+      - .github/workflows/test.yml
+      - docker-compose.yml
+    
+    dependencies: [foundation, data, conversation, ingestion, orchestration]
+    
+    service_accounts_needed:
+      - response-engine@fdsanalytics.iam.gserviceaccount.com
+      - mcp-server@fdsanalytics.iam.gserviceaccount.com
+      - conversation-manager@fdsanalytics.iam.gserviceaccount.com
+      - gmail-ingestion@fdsanalytics.iam.gserviceaccount.com
+    
+    cloud_run_services:
+      - response-engine (512MB, 1 CPU, 0-10 instances, public)
+      - mcp-server (256MB, 0.5 CPU, 0-20 instances, internal)
+      - conversation-manager (256MB, 0.5 CPU, 0-10 instances, internal)
+    
+    cloud_functions:
+      - gmail-ingestion (512MB, 540s timeout, Pub/Sub trigger)
+    
+    cloud_scheduler:
+      - Job: gmail-ingestion-daily
+      - Schedule: "0 3 * * *" (3am CT daily)
+      - Trigger: Pub/Sub topic gmail-ingestion-trigger
+    
+    docker_compose_structure: |
+      Services for local development:
+      - response-engine (port 3000)
+      - mcp-server (port 3001)
+      - conversation-manager (port 3002)
+      
+      Volumes for hot-reload development.
+      Environment variables from .env.development
+    
+    github_actions_jobs:
+      test:
+        - Install dependencies
+        - Run unit tests
+        - Run integration tests
+        - Generate coverage report
+      
+      build:
+        - Build Docker images
+        - Push to GCR
+        - Tag with commit SHA and latest
+      
+      deploy:
+        - Deploy all services to Cloud Run
+        - Deploy Cloud Function
+        - Run smoke tests
+      
+      notify:
+        - Notify on success/failure
+    
+    output_criteria:
+      - All Dockerfiles build successfully
+      - docker-compose.yml runs locally
+      - Deployment scripts work end-to-end
+      - GitHub Actions workflows configured
+      - Service accounts created with correct IAM
+      - Cloud Scheduler configured
+      - Documentation complete (deployment.md, rollback.md)
+      - Can deploy entire system with single command
+    
+    reference_docs:
+      - docs/07-deployment-architecture.md (Complete GCP setup)
+      - docs/04-configuration-schema.md (Service configurations)
+      - docs/08-project-structure.md (Scripts organization)
+
+# =========================================================================
+# Execution Guidelines
+# =========================================================================
+execution_order:
+  phase_1:
+    agent: foundation
+    description: Build shared code first (everything depends on this)
+    output: Working shared package with 100% test coverage
+  
+  phase_2:
+    agents: [data, conversation, ingestion]
+    description: Build independent services in parallel
+    output: Three working services, each with tests
+  
+  phase_3:
+    agent: orchestration
+    description: Build Response Engine (integrates all services)
+    dependencies: [foundation, data, conversation]
+    output: Complete working system
+  
+  phase_4:
+    agent: testing
+    description: Comprehensive test coverage
+    dependencies: [all services built]
+    output: ">80% coverage, all tests passing"
+  
+  phase_5:
+    agent: devops
+    description: Deployment automation
+    dependencies: [all services and tests complete]
+    output: Automated deployment pipeline
+
+global_rules:
+  - Read ALL documentation in docs/ before starting
+  - Follow specifications exactly - no improvisation
+  - Write tests as you build (not after)
+  - Use TypeScript strict mode throughout
+  - Follow error handling patterns from docs/05-error-handling.md
+  - Follow logging patterns from docs/02-api-contracts.md
+  - No hardcoded secrets - use Secret Manager
+  - All SQL via stored procedures (no string building)
+  - Validate all user inputs
+  - Include JSDoc comments for public APIs
+
+validation_checklist:
+  - TypeScript compiles with no errors
+  - ESLint passes with no warnings
+  - All tests pass
+  - Test coverage meets thresholds
+  - Docker images build successfully
+  - Services run locally via docker-compose
+  - No secrets in code
+  - No TODO or FIXME comments in final code
+  - All files match project structure from docs/08-project-structure.md
+  - README.md updated with accurate instructions
+
+success_criteria:
+  - All 5 services implemented and tested
+  - >80% test coverage overall
+  - Deployment automated (single command)
+  - Documentation complete
+  - Runs locally via docker-compose
+  - Ready to deploy to GCP
+  - Zero security vulnerabilities
+  - Follows all specifications in docs/

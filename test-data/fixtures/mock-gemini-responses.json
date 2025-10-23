@@ -1,0 +1,71 @@
+{
+  "simple_sales_response": {
+    "text": "Based on the data, today's sales are $5,456.66. This represents a 13% increase compared to yesterday's sales of $4,823.45. Overall, sales are performing well!",
+    "function_calls": [
+      {
+        "name": "query_analytics",
+        "args": {
+          "metric": "net_sales",
+          "timeframe": {
+            "type": "relative",
+            "relative": "today"
+          },
+          "aggregation": "sum"
+        }
+      }
+    ]
+  },
+  "category_breakdown_response": {
+    "text": "Here's the breakdown of sales by category:\n\n- Beer: $1,234.56 (22.6%)\n- Sushi: $2,345.67 (43.0%)\n- Food: $1,876.43 (34.4%)\n\nSushi is leading in sales today!",
+    "function_calls": [
+      {
+        "name": "query_analytics",
+        "args": {
+          "metric": "net_sales",
+          "timeframe": {
+            "type": "relative",
+            "relative": "today"
+          },
+          "groupBy": "primary_category",
+          "aggregation": "sum"
+        }
+      }
+    ]
+  },
+  "comparison_response": {
+    "text": "Comparing this week to last week:\n\n- Beer: +10.4% ($8,645.23 vs $7,832.11)\n- Sushi: +10.5% ($16,432.89 vs $14,876.45)\n- Food: -13.7% ($13,145.67 vs $15,234.22)\n\nBeer and Sushi are trending up, while Food is down.",
+    "function_calls": [
+      {
+        "name": "query_analytics",
+        "args": {
+          "metric": "net_sales",
+          "timeframe": {
+            "type": "relative",
+            "relative": "this_week"
+          },
+          "groupBy": "primary_category",
+          "comparison": "last_week",
+          "aggregation": "sum"
+        }
+      }
+    ]
+  },
+  "forecast_response": {
+    "text": "Here's your 7-day forecast:\n\nWed Oct 23: $5,234 (range: $4,800-$5,650)\nThu Oct 24: $5,457 (range: $5,000-$5,900)\nFri Oct 25: $6,789 (range: $6,200-$7,350)\n\nPeak day is expected to be Friday!",
+    "function_calls": [
+      {
+        "name": "query_forecasts",
+        "args": {
+          "days": 7
+        }
+      }
+    ]
+  },
+  "context_summarization": {
+    "text": "The user asked about overall sales for today, and I provided the total ($5,456.66, up 13%). They then asked specifically about beer sales, indicating they want to drill down into category performance."
+  },
+  "error_invalid_category": {
+    "text": "I couldn't find a category called '(Beers)'. Did you mean:\n- (Beer)\n- (Wine)\n- (Liquor)\n\nPlease clarify which category you meant.",
+    "function_calls": []
+  }
+}

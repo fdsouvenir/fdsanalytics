@@ -1,0 +1,358 @@
+================================================================================
+DEPLOYMENT SCRIPT FIXES AND CHANGES
+FDS Analytics - Complete Change Log
+Date: 2025-10-22
+================================================================================
+
+SYSTEM PREREQUISITES INSTALLED
+================================================================================
+
+1. DOCKER INSTALLATION (ARM64 Chromebook)
+   Location: System-wide
+   Commands executed:
+
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl gnupg lsb-release
+
+   # Add Docker's GPG key
+   sudo mkdir -p /etc/apt/keyrings
+   curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+   # Add Docker repository
+   echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | sudo tee /etc/apt/sources.list.d/docker.list
+
+   # Install Docker
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+   # Start and enable Docker
+   sudo systemctl start docker
+   sudo systemctl enable docker
+   sudo usermod -aG docker $USER
+
+   # Fix Docker socket permissions
+   sudo chmod 666 /var/run/docker.sock
+
+2. DOCKER AUTHENTICATION FOR GCR
+   Location: User configuration
+   Command:
+
+   gcloud auth configure-docker gcr.io --quiet
+
+3. GOOGLE CLOUD API ENABLEMENT
+   Location: Project configuration
+   Command:
+
+   gcloud services enable eventarc.googleapis.com --project=fdsanalytics
+
+
+FILE CHANGES - SQL STORED PROCEDURES
+================================================================================
+
+4. FILE: /home/souvy/fdsanalytics/sql/stored-procedures/query_metrics.sql
+
+   Change 1: Fixed SQL error handling syntax
+   OLD: SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '...'
+   NEW: RAISE USING MESSAGE = '...'
+
+   Lines affected: 46, 50, 54, 58, 68
+
+   Change 2: Moved DECLARE statements to beginning of BEGIN block
+   OLD: DECLARE statements scattered throughout procedure
+   NEW: All DECLARE statements at top of BEGIN block
+
+   Added to declarations section (after line 42):
+   - DECLARE order_by_clause STRING DEFAULT '';
+   - DECLARE baseline_table STRING;
+   - DECLARE baseline_query STRING;
+   - DECLARE final_table STRING;
+   - DECLARE join_on_clause STRING DEFAULT '1=1';
+
+   Removed from lines 125, 169, 174, 212, 216
+
+5. FILE: /home/souvy/fdsanalytics/sql/stored-procedures/get_forecast.sql
+
+   Change: Fixed conditional statement syntax
+   OLD: ELSIF days > 14 THEN
+   NEW: ELSEIF days > 14 THEN
+
+   Line: 16
+
+6. FILE: /home/souvy/fdsanalytics/sql/stored-procedures/get_anomalies.sql
+
+   Change 1: Fixed conditional statement syntax
+   OLD: ELSIF days_back > 90 THEN
+   NEW: ELSEIF days_back > 90 THEN
+
+   Line: 16
+
+   Change 2: Moved DECLARE statement to beginning of BEGIN block
+   OLD: DECLARE has_insights BOOLEAN; at line 27
+   NEW: Moved to line 12 (after DECLARE lookback_days INT64;)
+
+
+FILE CHANGES - DEPLOYMENT SCRIPTS
+================================================================================
+
+7. FILE: /home/souvy/fdsanalytics/scripts/deploy/deploy-stored-procedures.sh
+
+   Change: Fixed path resolution
+   OLD:
+   PROJECT_ID="fdsanalytics"
+   SQL_DIR="$(dirname "$0")/../sql/stored-procedures"
+
+   NEW:
+   PROJECT_ID="fdsanalytics"
+   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+   SQL_DIR="${SCRIPT_DIR}/../../sql/stored-procedures"
+
+   Lines: 6-7
+
+8. FILE: /home/souvy/fdsanalytics/scripts/deploy/deploy-mcp-server.sh
+
+   Change: Fixed CPU configuration for Cloud Run
+   OLD:
+   --memory=256Mi \
+   --cpu=0.5 \
+   --timeout=30s \
+   --min-instances=0 \
+   --max-instances=20 \
+   --concurrency=10 \
+
+   NEW:
+   --memory=256Mi \
+   --cpu=1 \
+   --timeout=30s \
+   --min-instances=0 \
+   --max-instances=20 \
+   --concurrency=10 \
+
+   Line: 67
+   Reason: Cloud Run requires cpu >= 1 when concurrency > 1
+
+9. FILE: /home/souvy/fdsanalytics/scripts/deploy/deploy-conversation-manager.sh
+
+   Change: Fixed CPU configuration for Cloud Run
+   OLD:
+   --memory=256Mi \
+   --cpu=0.5 \
+   --timeout=30s \
+
+   NEW:
+   --memory=256Mi \
+   --cpu=1 \
+   --timeout=30s \
+
+   Line: 67
+   Reason: Cloud Run requires cpu >= 1 when concurrency > 1
+
+
+FILE CHANGES - SERVICE CODE
+================================================================================
+
+10. FILE: /home/souvy/fdsanalytics/services/mcp-server/src/tools/getAnomalies.tool.ts
+
+    Change: Fixed TypeScript class declaration syntax
+    OLD: export class GetAnomalies Tool {
+    NEW: export class GetAnomaliesTool {
+
+    Line: 32
+    Reason: Invalid syntax - space between class name and keyword
+
+11. FILE: /home/souvy/fdsanalytics/services/mcp-server/.dockerignore
+
+    Change: Removed tsconfig.json from ignore list
+    OLD:
+    node_modules
+    npm-debug.log
+    dist
+    .git
+    .gitignore
+    README.md
+    __tests__
+    *.test.ts
+    jest.config.js
+    tsconfig.json    <-- REMOVED THIS LINE
+    .env
+    .env.local
+    coverage
+    .DS_Store
+
+    NEW:
+    node_modules
+    npm-debug.log
+    dist
+    .git
+    .gitignore
+    README.md
+    __tests__
+    *.test.ts
+    jest.config.js
+    .env
+    .env.local
+    coverage
+    .DS_Store
+
+    Reason: Docker build needs tsconfig.json to compile TypeScript
+
+
+GENERATED FILES
+================================================================================
+
+12. FILE: /home/souvy/fdsanalytics/services/mcp-server/package-lock.json
+
+    Command: cd /home/souvy/fdsanalytics/services/mcp-server && npm install --package-lock-only
+    Reason: npm ci requires package-lock.json for Docker builds
+
+13. FILE: /home/souvy/fdsanalytics/services/conversation-manager/package-lock.json
+
+    Command: cd /home/souvy/fdsanalytics/services/conversation-manager && npm install --package-lock-only
+    Reason: npm ci requires package-lock.json for Docker builds
+
+14. FILE: /home/souvy/fdsanalytics/services/response-engine/package-lock.json
+
+    Command: cd /home/souvy/fdsanalytics/services/response-engine && npm install --package-lock-only
+    Reason: npm ci requires package-lock.json for Docker builds
+
+
+GOOGLE CLOUD IAM PERMISSIONS
+================================================================================
+
+15. SECRET MANAGER ACCESS FOR GMAIL INGESTION
+
+    Command:
+    gcloud secrets add-iam-policy-binding GMAIL_OAUTH_CREDENTIALS \
+      --member="serviceAccount:gmail-ingestion@fdsanalytics.iam.gserviceaccount.com" \
+      --role="roles/secretmanager.secretAccessor" \
+      --project=fdsanalytics
+
+    Reason: Cloud Function needs access to OAuth credentials secret
+
+
+DEPLOYMENT RESULTS
+================================================================================
+
+Successfully Deployed (2/5):
+✓ BigQuery Stored Procedures
+  - restaurant_analytics.query_metrics
+  - insights.get_forecast
+  - insights.get_anomalies
+
+✓ Gmail Ingestion (Cloud Function Gen2)
+  - Function: gmail-ingestion
+  - Trigger: Pub/Sub topic 'gmail-ingestion-trigger'
+  - URL: https://us-central1-fdsanalytics.cloudfunctions.net/gmail-ingestion
+
+Failed to Deploy (3/5):
+✗ MCP Server (Cloud Run)
+  Error: Container failed to start and listen on port 8080
+  Status: Image built and pushed successfully, runtime failure
+
+✗ Conversation Manager (Cloud Run)
+  Error: Container failed to start and listen on port 8080
+  Status: Image built and pushed successfully, runtime failure
+
+✗ Response Engine (Cloud Run)
+  Error: Container failed to start and listen on port 8080
+  Status: Image built and pushed successfully, runtime failure
+
+
+ISSUES IDENTIFIED BUT NOT YET RESOLVED
+================================================================================
+
+1. Cloud Run Container Startup Failures
+   - All three Cloud Run services build successfully
+   - Docker images pushed to gcr.io successfully
+   - Containers fail to start and respond on PORT=8080
+   - Health checks timeout
+   - Likely runtime/initialization error in Node.js code
+
+   Next steps needed:
+   - Review Cloud Run logs for startup errors
+   - Check for missing runtime dependencies
+   - Verify environment variables are correctly set
+   - Test container locally before deployment
+   - May need to add startup delay or health check configuration
+
+
+COMMANDS TO RUN DEPLOYMENT
+================================================================================
+
+Full deployment:
+./scripts/deploy/deploy-all.sh
+
+Individual service deployments:
+./scripts/deploy/deploy-stored-procedures.sh
+./scripts/deploy/deploy-mcp-server.sh
+./scripts/deploy/deploy-conversation-manager.sh
+./scripts/deploy/deploy-response-engine.sh
+./scripts/deploy/deploy-gmail-ingestion.sh
+
+
+VERIFICATION COMMANDS
+================================================================================
+
+Check deployed services:
+gcloud run services list --project=fdsanalytics --region=us-central1
+gcloud functions list --gen2 --project=fdsanalytics --region=us-central1
+
+View service logs:
+gcloud run logs read mcp-server --region=us-central1 --project=fdsanalytics --limit=50
+gcloud run logs read conversation-manager --region=us-central1 --project=fdsanalytics --limit=50
+gcloud run logs read response-engine --region=us-central1 --project=fdsanalytics --limit=50
+gcloud functions logs read gmail-ingestion --gen2 --region=us-central1 --project=fdsanalytics --limit=50
+
+Check BigQuery procedures:
+bq ls --routines --project_id=fdsanalytics restaurant_analytics
+bq ls --routines --project_id=fdsanalytics insights
+
+
+ENVIRONMENT DETAILS
+================================================================================
+
+System: Linux 6.6.88 (ARM64 Chromebook - Debian bookworm container)
+Docker: 28.5.1
+gcloud: 543.0.0
+Node.js: 20.x (in containers)
+Project ID: fdsanalytics
+Region: us-central1
+Working Directory: /home/souvy/fdsanalytics/services/mcp-server
+
+
+SUMMARY OF CHANGES BY CATEGORY
+================================================================================
+
+SQL Syntax Fixes: 3 files
+  - query_metrics.sql: SIGNAL→RAISE, moved 5 DECLARE statements
+  - get_forecast.sql: ELSIF→ELSEIF
+  - get_anomalies.sql: ELSIF→ELSEIF, moved 1 DECLARE statement
+
+TypeScript Fixes: 1 file
+  - getAnomalies.tool.ts: Fixed class declaration syntax
+
+Docker Configuration: 1 file
+  - .dockerignore: Removed tsconfig.json exclusion
+
+Deployment Scripts: 3 files
+  - deploy-stored-procedures.sh: Fixed path resolution
+  - deploy-mcp-server.sh: Changed CPU from 0.5 to 1
+  - deploy-conversation-manager.sh: Changed CPU from 0.5 to 1
+
+Generated Files: 3 files
+  - package-lock.json for mcp-server
+  - package-lock.json for conversation-manager
+  - package-lock.json for response-engine
+
+System Setup: 4 major tasks
+  - Installed Docker for ARM64
+  - Configured Docker authentication
+  - Enabled Eventarc API
+  - Granted Secret Manager permissions
+
+Total file modifications: 11 files
+Total commands executed: ~15 system commands
+Total API configurations: 2 (Eventarc API, Secret Manager IAM)
+
+================================================================================
+END OF DEPLOYMENT CHANGES LOG
+================================================================================

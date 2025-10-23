@@ -1,0 +1,58 @@
+{
+  "messages": [
+    {
+      "message_id": "msg-001",
+      "workspace_id": "test-workspace",
+      "thread_id": "thread-001",
+      "user_id": "user@test.com",
+      "message_text": "How are sales today?",
+      "message_type": "user",
+      "timestamp": "2025-10-22T10:00:00Z"
+    },
+    {
+      "message_id": "msg-002",
+      "workspace_id": "test-workspace",
+      "thread_id": "thread-001",
+      "user_id": "bot",
+      "message_text": "Today's sales are $5,456.66, up 13% from yesterday!",
+      "message_type": "bot",
+      "timestamp": "2025-10-22T10:00:05Z"
+    },
+    {
+      "message_id": "msg-003",
+      "workspace_id": "test-workspace",
+      "thread_id": "thread-001",
+      "user_id": "user@test.com",
+      "message_text": "What about beer specifically?",
+      "message_type": "user",
+      "timestamp": "2025-10-22T10:01:00Z"
+    },
+    {
+      "message_id": "msg-004",
+      "workspace_id": "test-workspace",
+      "thread_id": "thread-001",
+      "user_id": "bot",
+      "message_text": "Beer sales today are $1,234.56 (50 items sold), which is 22.6% of total sales.",
+      "message_type": "bot",
+      "timestamp": "2025-10-22T10:01:05Z"
+    }
+  ],
+  "conversation_context": {
+    "thread_id": "thread-001",
+    "relevant_messages": [
+      {
+        "role": "user",
+        "content": "How are sales today?"
+      },
+      {
+        "role": "assistant",
+        "content": "Today's sales are $5,456.66, up 13% from yesterday!"
+      },
+      {
+        "role": "user",
+        "content": "What about beer specifically?"
+      }
+    ],
+    "summary": "User asked about overall sales for today, then followed up asking specifically about beer sales."
+  }
+}

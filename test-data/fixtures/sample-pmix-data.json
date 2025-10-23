@@ -1,0 +1,63 @@
+{
+  "report_id": "2025-10-22-test-001",
+  "report_date": "2025-10-22",
+  "business_date": "2025-10-22",
+  "location_name": "Test Restaurant",
+  "metrics": [
+    {
+      "metric_id": "2025-10-22-test-001-001",
+      "report_id": "2025-10-22-test-001",
+      "metric_name": "net_sales",
+      "metric_value": "$1234.56",
+      "primary_category": "(Beer)",
+      "dimensions": {
+        "category": "Draft Beer",
+        "item_name": "IPA"
+      }
+    },
+    {
+      "metric_id": "2025-10-22-test-001-002",
+      "report_id": "2025-10-22-test-001",
+      "metric_name": "quantity_sold",
+      "metric_value": "50",
+      "primary_category": "(Beer)",
+      "dimensions": {
+        "category": "Draft Beer",
+        "item_name": "IPA"
+      }
+    },
+    {
+      "metric_id": "2025-10-22-test-001-003",
+      "report_id": "2025-10-22-test-001",
+      "metric_name": "net_sales",
+      "metric_value": "$2345.67",
+      "primary_category": "(Sushi)",
+      "dimensions": {
+        "category": "Signature Rolls",
+        "item_name": "Spicy Tuna Roll"
+      }
+    },
+    {
+      "metric_id": "2025-10-22-test-001-004",
+      "report_id": "2025-10-22-test-001",
+      "metric_name": "quantity_sold",
+      "metric_value": "85",
+      "primary_category": "(Sushi)",
+      "dimensions": {
+        "category": "Signature Rolls",
+        "item_name": "Spicy Tuna Roll"
+      }
+    },
+    {
+      "metric_id": "2025-10-22-test-001-005",
+      "report_id": "2025-10-22-test-001",
+      "metric_name": "net_sales",
+      "metric_value": "$1876.43",
+      "primary_category": "(Food)",
+      "dimensions": {
+        "category": "Starters",
+        "item_name": "Edamame"
+      }
+    }
+  ]
+}

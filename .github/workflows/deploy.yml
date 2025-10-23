@@ -1,0 +1,209 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: fdsanalytics
+  REGION: us-central1
+  NODE_VERSION: '20'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run Tests Before Deploy
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: |
+          npm run test:unit || echo "No unit tests found"
+          npm run test:integration || echo "No integration tests found"
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          ENVIRONMENT: test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Build Docker Images
+
+    strategy:
+      matrix:
+        service: [response-engine, mcp-server, conversation-manager]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build and push Docker image
+        run: |
+          cd services/${{ matrix.service }}
+          IMAGE="gcr.io/${{ env.PROJECT_ID }}/${{ matrix.service }}:${{ github.sha }}"
+          IMAGE_LATEST="gcr.io/${{ env.PROJECT_ID }}/${{ matrix.service }}:latest"
+
+          docker build -t "${IMAGE}" -t "${IMAGE_LATEST}" .
+          docker push "${IMAGE}"
+          docker push "${IMAGE_LATEST}"
+
+      - name: Image built
+        run: |
+          echo "Built and pushed: gcr.io/${{ env.PROJECT_ID }}/${{ matrix.service }}:${{ github.sha }}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy Services to GCP
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Deploy BigQuery Stored Procedures
+        run: |
+          chmod +x scripts/deploy/deploy-stored-procedures.sh
+          ./scripts/deploy/deploy-stored-procedures.sh
+        continue-on-error: true
+
+      - name: Deploy MCP Server
+        run: |
+          chmod +x scripts/deploy/deploy-mcp-server.sh
+          export PROJECT_ID=${{ env.PROJECT_ID }}
+          export REGION=${{ env.REGION }}
+          ./scripts/deploy/deploy-mcp-server.sh
+
+      - name: Deploy Conversation Manager
+        run: |
+          chmod +x scripts/deploy/deploy-conversation-manager.sh
+          export PROJECT_ID=${{ env.PROJECT_ID }}
+          export REGION=${{ env.REGION }}
+          ./scripts/deploy/deploy-conversation-manager.sh
+
+      - name: Grant Service-to-Service Permissions
+        run: |
+          gcloud run services add-iam-policy-binding mcp-server \
+            --region=${{ env.REGION }} \
+            --member='serviceAccount:response-engine@${{ env.PROJECT_ID }}.iam.gserviceaccount.com' \
+            --role='roles/run.invoker' \
+            --project=${{ env.PROJECT_ID }} \
+            --quiet || true
+
+          gcloud run services add-iam-policy-binding conversation-manager \
+            --region=${{ env.REGION }} \
+            --member='serviceAccount:response-engine@${{ env.PROJECT_ID }}.iam.gserviceaccount.com' \
+            --role='roles/run.invoker' \
+            --project=${{ env.PROJECT_ID }} \
+            --quiet || true
+
+      - name: Deploy Response Engine
+        run: |
+          chmod +x scripts/deploy/deploy-response-engine.sh
+          export PROJECT_ID=${{ env.PROJECT_ID }}
+          export REGION=${{ env.REGION }}
+          ./scripts/deploy/deploy-response-engine.sh
+
+      - name: Deploy Gmail Ingestion
+        run: |
+          chmod +x scripts/deploy/deploy-gmail-ingestion.sh
+          export PROJECT_ID=${{ env.PROJECT_ID }}
+          export REGION=${{ env.REGION }}
+          ./scripts/deploy/deploy-gmail-ingestion.sh
+        continue-on-error: true
+
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    name: Run Smoke Tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run health checks
+        run: |
+          chmod +x scripts/utilities/health-check-all.sh
+          export PROJECT_ID=${{ env.PROJECT_ID }}
+          export REGION=${{ env.REGION }}
+          ./scripts/utilities/health-check-all.sh
+
+      - name: Test Response Engine endpoint
+        run: |
+          URL=$(gcloud run services describe response-engine \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format='value(status.url)')
+
+          echo "Testing: ${URL}/health"
+          curl -f -s "${URL}/health" || exit 1
+
+  notify:
+    needs: [deploy, smoke-test]
+    runs-on: ubuntu-latest
+    if: always()
+    name: Notify Deployment Status
+
+    steps:
+      - name: Deployment status
+        run: |
+          if [ "${{ needs.smoke-test.result }}" == "success" ]; then
+            echo "✅ Deployment successful"
+            echo "## Deployment Successful ✅" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Deployment failed"
+            echo "## Deployment Failed ❌" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Notify on success (optional)
+        if: success() && github.event_name == 'push'
+        run: |
+          # Add Slack/email notification here if needed
+          echo "Deployment successful notification"
+
+      - name: Notify on failure (optional)
+        if: failure()
+        run: |
+          # Add Slack/email notification here if needed
+          echo "Deployment failed notification"

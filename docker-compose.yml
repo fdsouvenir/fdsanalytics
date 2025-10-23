@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  response-engine:
+    build:
+      context: ./services/response-engine
+      dockerfile: Dockerfile
+    ports:
+      - "3000:8080"
+    environment:
+      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
+      - REGION=${REGION:-us-central1}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
+      - MCP_SERVER_URL=http://mcp-server:8080
+      - CONVERSATION_MANAGER_URL=http://conversation-manager:8080
+      - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
+      - BQ_DATASET_INSIGHTS=${BQ_DATASET_INSIGHTS:-insights}
+      - BQ_DATASET_CHAT_HISTORY=${BQ_DATASET_CHAT_HISTORY:-chat_history}
+      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
+      - PORT=8080
+    volumes:
+      - ./services/response-engine/src:/app/src
+    depends_on:
+      - mcp-server
+      - conversation-manager
+    networks:
+      - fdsanalytics
+
+  mcp-server:
+    build:
+      context: ./services/mcp-server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:8080"
+    environment:
+      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
+      - REGION=${REGION:-us-central1}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
+      - BQ_DATASET_INSIGHTS=${BQ_DATASET_INSIGHTS:-insights}
+      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
+      - PORT=8080
+    volumes:
+      - ./services/mcp-server/src:/app/src
+    networks:
+      - fdsanalytics
+
+  conversation-manager:
+    build:
+      context: ./services/conversation-manager
+      dockerfile: Dockerfile
+    ports:
+      - "3002:8080"
+    environment:
+      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
+      - REGION=${REGION:-us-central1}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
+      - BQ_DATASET_CHAT_HISTORY=${BQ_DATASET_CHAT_HISTORY:-chat_history}
+      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
+      - PORT=8080
+    volumes:
+      - ./services/conversation-manager/src:/app/src
+    networks:
+      - fdsanalytics
+
+  gmail-ingestion:
+    build:
+      context: ./services/gmail-ingestion
+      dockerfile: Dockerfile
+    ports:
+      - "3003:8080"
+    environment:
+      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
+      - REGION=${REGION:-us-central1}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
+      - GMAIL_OAUTH_SECRET_NAME=${GMAIL_OAUTH_SECRET_NAME:-GMAIL_OAUTH_CREDENTIALS}
+      - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
+      - BQ_DATASET_INGESTION=${BQ_DATASET_INGESTION:-ingestion}
+      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
+      - GMAIL_SEARCH_QUERY=${GMAIL_SEARCH_QUERY:-from:spoton subject:pmix has:attachment}
+      - PORT=8080
+    volumes:
+      - ./services/gmail-ingestion/src:/app/src
+    networks:
+      - fdsanalytics
+
+networks:
+  fdsanalytics:
+    name: fdsanalytics
+    driver: bridge

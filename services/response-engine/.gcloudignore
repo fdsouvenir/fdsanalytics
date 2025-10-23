@@ -1,0 +1,12 @@
+# .gcloudignore - Files to exclude from Cloud Build
+# Unlike .gitignore, we MUST include package-lock.json for npm ci
+
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.git/
+.vscode/
+coverage/
+.DS_Store
