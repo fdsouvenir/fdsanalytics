@@ -85,7 +85,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --concurrency=10 \
   --ingress=all \
   --allow-unauthenticated \
-  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,MCP_SERVER_URL=${MCP_SERVER_URL},CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL}" \
+  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,MCP_SERVER_URL=${MCP_SERVER_URL},CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
   --project="${PROJECT_ID}" || {
   echo -e "${RED}Deployment failed${NC}"

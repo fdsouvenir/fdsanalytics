@@ -64,7 +64,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --min-instances=0 \
   --max-instances=20 \
   --concurrency=10 \
-  --ingress=internal \
+  --ingress=all \
   --no-allow-unauthenticated \
   --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info" \
   --project="${PROJECT_ID}" || {
