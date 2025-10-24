@@ -38,13 +38,13 @@ echo -e "${YELLOW}Region: ${REGION}${NC}"
 echo -e "${YELLOW}Service: ${SERVICE_NAME}${NC}"
 echo ""
 
-# Navigate to service directory
-SERVICE_DIR="$(cd "$(dirname "$0")/../../services/${SERVICE_NAME}" && pwd)"
-cd "${SERVICE_DIR}"
+# Navigate to repository root (for monorepo build context)
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "${REPO_ROOT}"
 
 # Build Docker image for AMD64 (Cloud Run architecture)
-echo -e "${GREEN}Building Docker image for AMD64...${NC}"
-docker buildx build --platform linux/amd64 -t "${IMAGE}" --push . || {
+echo -e "${GREEN}Building Docker image for AMD64 (from repo root)...${NC}"
+docker buildx build --platform linux/amd64 -t "${IMAGE}" --push -f services/${SERVICE_NAME}/Dockerfile . || {
   echo -e "${RED}Docker build failed${NC}"
   exit 1
 }

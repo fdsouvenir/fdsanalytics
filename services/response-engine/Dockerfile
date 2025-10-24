@@ -5,14 +5,14 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
+COPY services/response-engine/package*.json ./
+COPY services/response-engine/tsconfig.json ./
 
 # Install dependencies
 RUN npm ci
 
 # Copy source code
-COPY src ./src
+COPY services/response-engine/src ./src
 
 # Build TypeScript
 RUN npm run build
@@ -23,7 +23,7 @@ FROM node:20-slim
 WORKDIR /app
 
 # Copy package files and install production dependencies
-COPY package*.json ./
+COPY services/response-engine/package*.json ./
 RUN npm ci --only=production
 
 # Copy compiled code from builder

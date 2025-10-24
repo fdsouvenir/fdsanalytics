@@ -4,7 +4,7 @@ import { ChartBuilder } from '../chart/ChartBuilder';
 import { ChartTypeSelector } from '../chart/ChartTypeSelector';
 import { ChartSpec, ChartType } from '../chart/chartTypes';
 import { TenantConfig } from '../config/tenantConfig';
-import { formatChartLabel } from '../../../../shared/dist/utils/labelFormatter';
+import { formatChartLabel } from '../utils/labelFormatter';
 
 interface ConversationContext {
   relevantMessages: Array<{
