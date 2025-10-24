@@ -17,9 +17,13 @@ export interface ChatMessageRequest {
 
 export interface ChatMessageResponse {
   text: string;
-  cards?: any[];
-  threadId?: string;
-  responseType: 'NEW_MESSAGE' | 'UPDATE_MESSAGE';
+  cardsV2?: Array<{
+    cardId: string;
+    card: any;
+  }>;
+  actionResponse?: {
+    type: 'UPDATE_MESSAGE' | 'NEW_MESSAGE';
+  };
 }
 
 /**
@@ -47,7 +51,8 @@ export class ResponseEngine {
     this.responseGenerator = new ResponseGenerator(
       mcpClient,
       geminiClient,
-      config.enableCharts
+      config.enableCharts,
+      config.maxChartDatapoints
     );
     this.responseFormatter = new ResponseFormatter(config.defaultCurrency);
   }
@@ -67,8 +72,7 @@ export class ResponseEngine {
 
       if (!tenantConfig) {
         return {
-          text: 'Please run /setup first to configure your account.',
-          responseType: 'NEW_MESSAGE'
+          text: 'Please run /setup first to configure your account.'
         };
       }
 
@@ -120,8 +124,7 @@ export class ResponseEngine {
       const response = this.responseFormatter.formatResponse(
         result.responseText,
         result.chartUrl,
-        result.chartTitle,
-        request.threadId
+        result.chartTitle
       );
 
       // Log performance

@@ -126,7 +126,7 @@ async function processMessageAsync(
     // Post back to Google Chat using Chat API
     await postMessageToChat(spaceName, {
       text: response.text,
-      cards: response.cards,
+      cardsV2: response.cardsV2,
       thread: threadName ? { name: threadName } : undefined
     });
 

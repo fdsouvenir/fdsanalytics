@@ -2,7 +2,10 @@ import { GoogleAuth } from 'google-auth-library';
 
 export interface ChatMessage {
   text: string;
-  cards?: any[];
+  cardsV2?: Array<{
+    cardId: string;
+    card: any;
+  }>;
   thread?: {
     name: string;
   };
@@ -38,17 +41,14 @@ export async function postMessageToChat(
       body.thread = message.thread;
     }
 
-    if (message.cards && message.cards.length > 0) {
-      body.cardsV2 = message.cards.map((card, index) => ({
-        cardId: `card_${index}`,
-        card
-      }));
+    if (message.cardsV2 && message.cardsV2.length > 0) {
+      body.cardsV2 = message.cardsV2;
     }
 
     console.log('Posting to Chat API:', {
       url,
       hasThread: !!message.thread,
-      hasCards: !!(message.cards && message.cards.length > 0)
+      hasCards: !!(message.cardsV2 && message.cardsV2.length > 0)
     });
 
     const response = await fetch(url, {

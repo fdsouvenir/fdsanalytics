@@ -1,4 +1,4 @@
-import { ChartSpec } from '../chart/ChartBuilder';
+import { ChartSpec } from '../chart/chartTypes';
 
 interface Card {
   header?: {
@@ -12,9 +12,14 @@ interface Card {
 
 export interface FormattedResponse {
   text: string;
-  cards?: Card[];
-  threadId?: string;
-  responseType: 'NEW_MESSAGE' | 'UPDATE_MESSAGE';
+  cardsV2?: Array<{
+    cardId: string;
+    card: Card;
+  }>;
+  // Optional action response for future use
+  actionResponse?: {
+    type: 'UPDATE_MESSAGE' | 'NEW_MESSAGE';
+  };
 }
 
 /**
@@ -35,20 +40,17 @@ export class ResponseFormatter {
   formatResponse(
     text: string,
     chartUrl: string | null,
-    chartTitle?: string,
-    threadId?: string
+    chartTitle?: string
   ): FormattedResponse {
     const response: FormattedResponse = {
-      text: this.formatText(text),
-      responseType: 'NEW_MESSAGE'
+      text: this.formatText(text)
     };
 
     if (chartUrl && chartTitle) {
-      response.cards = [this.createChartCard(chartUrl, chartTitle)];
-    }
-
-    if (threadId) {
-      response.threadId = threadId;
+      response.cardsV2 = [{
+        cardId: `chart_${Date.now()}`,
+        card: this.createChartCard(chartUrl, chartTitle)
+      }];
     }
 
     return response;
@@ -135,8 +137,7 @@ export class ResponseFormatter {
     }
 
     return {
-      text,
-      responseType: 'NEW_MESSAGE'
+      text
     };
   }
 
@@ -145,8 +146,7 @@ export class ResponseFormatter {
    */
   formatNoData(query: string): FormattedResponse {
     return {
-      text: `I couldn't find any data for "${query}". Try adjusting your date range or category.`,
-      responseType: 'NEW_MESSAGE'
+      text: `I couldn't find any data for "${query}". Try adjusting your date range or category.`
     };
   }
 }

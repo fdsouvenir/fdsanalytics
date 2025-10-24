@@ -1,23 +1,4 @@
-interface ChartDataset {
-  label: string;
-  data: number[];
-  backgroundColor?: string | string[];
-  borderColor?: string;
-  borderWidth?: number;
-}
-
-export interface ChartSpec {
-  type: 'bar' | 'line' | 'pie' | 'horizontalBar';
-  title: string;
-  data: {
-    labels: string[];
-    datasets: ChartDataset[];
-  };
-  options?: {
-    scales?: any;
-    plugins?: any;
-  };
-}
+import { ChartSpec, ChartType, COLOR_PALETTES } from './chartTypes';
 
 /**
  * ChartBuilder - Generate charts using quickchart.io
@@ -30,14 +11,6 @@ export interface ChartSpec {
  */
 export class ChartBuilder {
   private static readonly QUICKCHART_BASE_URL = 'https://quickchart.io/chart';
-  private static readonly DEFAULT_COLORS = [
-    '#4285F4', // Google Blue
-    '#34A853', // Google Green
-    '#FBBC05', // Google Yellow
-    '#EA4335', // Google Red
-    '#9C27B0', // Purple
-    '#00BCD4'  // Cyan
-  ];
 
   private failureCount = 0;
   private lastFailureTime: number | null = null;
@@ -100,22 +73,12 @@ export class ChartBuilder {
    * Build Chart.js configuration object
    */
   private buildChartConfig(spec: ChartSpec): any {
-    // Assign colors if not provided
-    const datasets = spec.data.datasets.map((dataset, index) => {
-      if (!dataset.backgroundColor) {
-        if (spec.type === 'pie') {
-          // Pie charts need array of colors
-          dataset.backgroundColor = ChartBuilder.DEFAULT_COLORS.slice(0, spec.data.labels.length);
-        } else {
-          // Bar/line charts use single color per dataset
-          dataset.backgroundColor = ChartBuilder.DEFAULT_COLORS[index % ChartBuilder.DEFAULT_COLORS.length];
-        }
-      }
-      return dataset;
-    });
+    // Apply colors if not provided
+    const datasets = this.applyColors(spec);
 
+    // Build base config
     const config: any = {
-      type: spec.type === 'horizontalBar' ? 'horizontalBar' : spec.type,
+      type: this.getChartJsType(spec.type),
       data: {
         labels: spec.data.labels,
         datasets
@@ -126,23 +89,172 @@ export class ChartBuilder {
             display: true,
             text: spec.title,
             font: {
-              size: 16
+              size: 16,
+              weight: 'bold'
             }
           },
+          subtitle: spec.subtitle ? {
+            display: true,
+            text: spec.subtitle,
+            font: {
+              size: 12
+            }
+          } : undefined,
           legend: {
-            display: spec.data.datasets.length > 1 || spec.type === 'pie'
+            display: this.shouldShowLegend(spec)
           }
         },
-        scales: spec.type !== 'pie' ? {
-          y: {
-            beginAtZero: true
-          }
-        } : undefined,
+        responsive: true,
+        maintainAspectRatio: true,
+        ...this.getChartTypeOptions(spec.type),
         ...spec.options
       }
     };
 
     return config;
+  }
+
+  /**
+   * Apply colors to datasets based on chart type
+   */
+  private applyColors(spec: ChartSpec): any[] {
+    const colors = COLOR_PALETTES.default;
+
+    return spec.data.datasets.map((dataset, index) => {
+      const datasetCopy = { ...dataset };
+
+      // Chart types that need array of colors (one per data point)
+      const needsColorArray = ['pie', 'doughnut', 'polarArea'].includes(spec.type);
+
+      if (!datasetCopy.backgroundColor) {
+        if (needsColorArray) {
+          datasetCopy.backgroundColor = colors.slice(0, spec.data.labels.length);
+        } else {
+          datasetCopy.backgroundColor = colors[index % colors.length];
+        }
+      }
+
+      // Add border color for line/area/radar charts
+      if (['line', 'area', 'radar'].includes(spec.type) && !datasetCopy.borderColor) {
+        datasetCopy.borderColor = colors[index % colors.length].replace('0.8', '1');
+        datasetCopy.borderWidth = 2;
+      }
+
+      // Area charts should fill
+      if (spec.type === 'area') {
+        datasetCopy.fill = true;
+      }
+
+      return datasetCopy;
+    });
+  }
+
+  /**
+   * Get Chart.js type name (some types have different names)
+   */
+  private getChartJsType(type: ChartType): string {
+    const typeMap: Record<ChartType, string> = {
+      bar: 'bar',
+      horizontalBar: 'horizontalBar',
+      line: 'line',
+      area: 'line',  // Area uses line type with fill
+      pie: 'pie',
+      doughnut: 'doughnut',
+      radar: 'radar',
+      scatter: 'scatter',
+      bubble: 'bubble',
+      polarArea: 'polarArea',
+      mixed: 'bar'  // Mixed uses bar as base
+    };
+
+    return typeMap[type] || 'bar';
+  }
+
+  /**
+   * Get chart-type-specific options
+   */
+  private getChartTypeOptions(type: ChartType): any {
+    const needsScales = !['pie', 'doughnut', 'radar', 'polarArea'].includes(type);
+
+    const options: any = {};
+
+    if (needsScales) {
+      options.scales = {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(value: any) {
+              // Format large numbers with K, M suffixes
+              if (value >= 1000000) {
+                return '$' + (value / 1000000).toFixed(1) + 'M';
+              } else if (value >= 1000) {
+                return '$' + (value / 1000).toFixed(1) + 'K';
+              }
+              return '$' + value;
+            }
+          }
+        },
+        x: {
+          ticks: {
+            autoSkip: true,
+            maxRotation: 45,
+            minRotation: 0
+          }
+        }
+      };
+
+      // Flip axes for horizontal bar
+      if (type === 'horizontalBar') {
+        options.indexAxis = 'y';
+      }
+    }
+
+    // Radar-specific options
+    if (type === 'radar') {
+      options.elements = {
+        line: {
+          borderWidth: 3
+        }
+      };
+      options.scales = {
+        r: {
+          beginAtZero: true
+        }
+      };
+    }
+
+    // Scatter/bubble-specific options
+    if (type === 'scatter' || type === 'bubble') {
+      options.scales = {
+        x: {
+          type: 'linear',
+          position: 'bottom'
+        },
+        y: {
+          beginAtZero: true
+        }
+      };
+    }
+
+    return options;
+  }
+
+  /**
+   * Determine if legend should be shown
+   */
+  private shouldShowLegend(spec: ChartSpec): boolean {
+    // Always show legend for certain chart types
+    if (['pie', 'doughnut', 'radar', 'polarArea'].includes(spec.type)) {
+      return true;
+    }
+
+    // Show legend if multiple datasets
+    if (spec.data.datasets.length > 1) {
+      return true;
+    }
+
+    // Hide legend for single-dataset simple charts
+    return false;
   }
 
   /**
