@@ -280,6 +280,31 @@ export class ChartBuilder {
       }
     }
 
+    // Defensive validation: ensure all labels are strings
+    // This should not trigger if ResponseGenerator is working correctly,
+    // but provides a safety net to prevent "[object Object]" labels
+    for (let i = 0; i < spec.data.labels.length; i++) {
+      const label = spec.data.labels[i];
+      if (typeof label !== 'string') {
+        console.warn('Non-string label detected in chart data', {
+          index: i,
+          labelType: typeof label,
+          labelValue: label,
+          message: 'Applying fallback String() conversion'
+        });
+        // Apply fallback conversion (should be rare)
+        spec.data.labels[i] = String(label);
+      }
+      // Also check for the specific "[object Object]" pattern
+      if (label === '[object Object]') {
+        console.error('Invalid label "[object Object]" detected', {
+          index: i,
+          message: 'This indicates an object was improperly stringified upstream'
+        });
+        throw new Error('Invalid chart label detected: [object Object]');
+      }
+    }
+
     // Check max datapoints (prevent URL from being too long)
     if (spec.data.labels.length > 20) {
       throw new Error('Maximum 20 data points allowed for charts');

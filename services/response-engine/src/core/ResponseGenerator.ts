@@ -4,6 +4,7 @@ import { ChartBuilder } from '../chart/ChartBuilder';
 import { ChartTypeSelector } from '../chart/ChartTypeSelector';
 import { ChartSpec, ChartType } from '../chart/chartTypes';
 import { TenantConfig } from '../config/tenantConfig';
+import { formatChartLabel } from '../../../../shared/dist/utils/labelFormatter';
 
 interface ConversationContext {
   relevantMessages: Array<{
@@ -363,7 +364,7 @@ export class ResponseGenerator {
         return null;
       }
 
-      const labels = rows.map((row: any) => String(row[labelField!]));
+      const labels = rows.map((row: any) => formatChartLabel(row[labelField!], labelField!));
       const values = rows.map((row: any) => parseFloat(row[valueField!]) || 0);
 
       // Use Gemini to intelligently select chart type

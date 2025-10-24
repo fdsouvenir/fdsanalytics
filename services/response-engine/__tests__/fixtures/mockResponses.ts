@@ -110,3 +110,62 @@ export const mockGoogleChatWebhook = {
     type: 'ROOM'
   }
 };
+
+/**
+ * Chart test data for integration tests
+ */
+export const mockDateSeriesData = {
+  rows: [
+    { report_date: new Date('2025-01-20T00:00:00Z'), net_sales: 4500.00 },
+    { report_date: new Date('2025-01-21T00:00:00Z'), net_sales: 4800.00 },
+    { report_date: new Date('2025-01-22T00:00:00Z'), net_sales: 5200.00 },
+    { report_date: new Date('2025-01-23T00:00:00Z'), net_sales: 4900.00 }
+  ],
+  totalRows: 4,
+  executionTimeMs: 180
+};
+
+export const mockDayOfWeekData = {
+  rows: [
+    { day_of_week: new Date('2025-10-20T00:00:00Z'), total: 5000.00 }, // Monday
+    { day_of_week: new Date('2025-10-21T00:00:00Z'), total: 5500.00 }, // Tuesday
+    { day_of_week: new Date('2025-10-22T00:00:00Z'), total: 6000.00 }, // Wednesday
+    { day_of_week: new Date('2025-10-23T00:00:00Z'), total: 6200.00 }, // Thursday
+    { day_of_week: new Date('2025-10-24T00:00:00Z'), total: 7000.00 }  // Friday
+  ],
+  totalRows: 5,
+  executionTimeMs: 195
+};
+
+export const mockCategoryData = {
+  rows: [
+    { primary_category: '(Beer)', net_sales: 5234.50 },
+    { primary_category: '(Sushi)', net_sales: 8123.75 },
+    { primary_category: '(Food)', net_sales: 12456.25 },
+    { primary_category: '(Wine)', net_sales: 3456.00 }
+  ],
+  totalRows: 4,
+  executionTimeMs: 150
+};
+
+export const mockSubcategoryData = {
+  rows: [
+    { subcategory: 'Draft Beer', quantity_sold: 45 },
+    { subcategory: 'Bottle Beer', quantity_sold: 32 },
+    { subcategory: 'Signature Rolls', quantity_sold: 28 },
+    { subcategory: 'Classic Rolls', quantity_sold: 35 }
+  ],
+  totalRows: 4,
+  executionTimeMs: 160
+};
+
+export const mockNumberLabelData = {
+  rows: [
+    { item_name: 'Item 1', quantity_sold: 10 },
+    { item_name: 'Item 2', quantity_sold: 20 },
+    { item_name: 'Item 3', quantity_sold: 30 },
+    { item_name: 'Item 4', quantity_sold: 40 }
+  ],
+  totalRows: 4,
+  executionTimeMs: 140
+};

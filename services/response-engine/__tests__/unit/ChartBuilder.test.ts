@@ -128,4 +128,148 @@ describe('ChartBuilder', () => {
       expect(spec.data.datasets[0].borderColor).toBeDefined();
     });
   });
+
+  describe('defensive validation for label types', () => {
+    let consoleWarnSpy: jest.SpyInstance;
+    let consoleErrorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+    });
+
+    afterEach(() => {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should convert non-string labels to strings and warn', async () => {
+      const spec: any = {
+        type: 'bar',
+        title: 'Test',
+        data: {
+          labels: ['A', 123, 'C'], // Number in the middle
+          datasets: [
+            {
+              label: 'Values',
+              data: [100, 200, 300]
+            }
+          ]
+        }
+      };
+
+      const url = await chartBuilder.generateChartUrl(spec);
+
+      // Should succeed after converting number to string
+      expect(url).not.toBeNull();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Non-string label detected in chart data',
+        expect.objectContaining({
+          index: 1,
+          labelType: 'number',
+          labelValue: 123
+        })
+      );
+      // Label should be converted to string
+      expect(spec.data.labels[1]).toBe('123');
+    });
+
+    it('should throw error for "[object Object]" labels', async () => {
+      const spec: any = {
+        type: 'bar',
+        title: 'Test',
+        data: {
+          labels: ['A', '[object Object]', 'C'],
+          datasets: [
+            {
+              label: 'Values',
+              data: [100, 200, 300]
+            }
+          ]
+        }
+      };
+
+      const url = await chartBuilder.generateChartUrl(spec);
+
+      // Should fail due to [object Object] detection
+      expect(url).toBeNull();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Invalid label "[object Object]" detected',
+        expect.objectContaining({
+          index: 1,
+          message: 'This indicates an object was improperly stringified upstream'
+        })
+      );
+    });
+
+    it('should handle Date objects in labels with warning', async () => {
+      const spec: any = {
+        type: 'line',
+        title: 'Test',
+        data: {
+          labels: ['Day 1', new Date('2025-10-24'), 'Day 3'],
+          datasets: [
+            {
+              label: 'Values',
+              data: [100, 200, 300]
+            }
+          ]
+        }
+      };
+
+      const url = await chartBuilder.generateChartUrl(spec);
+
+      // Should succeed after converting Date to string
+      expect(url).not.toBeNull();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Non-string label detected in chart data',
+        expect.objectContaining({
+          index: 1,
+          labelType: 'object'
+        })
+      );
+      // Date should be converted to string (String() produces verbose format)
+      expect(typeof spec.data.labels[1]).toBe('string');
+      expect(spec.data.labels[1]).toContain('2025'); // Year should be present
+      expect(spec.data.labels[1]).toContain('Oct'); // Month should be present
+    });
+
+    it('should handle multiple non-string labels', async () => {
+      const spec: any = {
+        type: 'bar',
+        title: 'Test',
+        data: {
+          labels: [true, 42, false, 100],
+          datasets: [
+            {
+              label: 'Values',
+              data: [10, 20, 30, 40]
+            }
+          ]
+        }
+      };
+
+      const url = await chartBuilder.generateChartUrl(spec);
+
+      expect(url).not.toBeNull();
+      // Should warn for each non-string label
+      expect(consoleWarnSpy).toHaveBeenCalledTimes(4);
+      // All labels should be converted to strings
+      expect(spec.data.labels).toEqual(['true', '42', 'false', '100']);
+    });
+
+    it('should accept all valid string labels without warnings', async () => {
+      const spec = ChartBuilder.createSampleBarChart(
+        'Valid Chart',
+        ['Label1', 'Label2', 'Label3'],
+        [100, 200, 300]
+      );
+
+      const url = await chartBuilder.generateChartUrl(spec);
+
+      expect(url).not.toBeNull();
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    });
+  });
 });
