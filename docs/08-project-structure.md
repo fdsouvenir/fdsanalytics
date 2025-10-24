@@ -27,6 +27,10 @@ restaurant-analytics/
 │   ├── constants/
 │   └── errors/
 │
+├── sql/
+│   ├── stored-procedures/
+│   └── migrations/
+│
 ├── scripts/
 │   ├── setup/
 │   ├── deploy/
@@ -225,14 +229,9 @@ services/mcp-server/
 │   └── config/
 │       └── config.ts
 │
-├── sql/
+├── sql/                                # Empty - SQL moved to root /sql
 │   ├── stored-procedures/
-│   │   ├── query_metrics.sql         # Main query procedure
-│   │   ├── get_forecast.sql          # Forecast procedure
-│   │   └── get_anomalies.sql         # Anomalies procedure
-│   │
 │   └── migrations/
-│       └── 001_create_procedures.sql
 │
 ├── __tests__/
 │   ├── unit/
@@ -246,6 +245,12 @@ services/mcp-server/
 ├── package.json
 └── README.md
 ```
+
+**Note:** BigQuery stored procedures are located at `/sql/stored-procedures/` (root level) for shared access across services:
+- `/sql/stored-procedures/query_metrics.sql`
+- `/sql/stored-procedures/get_forecast.sql`
+- `/sql/stored-procedures/get_anomalies.sql`
+- `/sql/migrations/001_create_procedures.sql`
 
 **Key Files:**
 

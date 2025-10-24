@@ -1,7 +1,7 @@
 {
   "name": "gmail-ingestion",
   "version": "1.0.0",
-  "description": "Gmail Ingestion Cloud Function for PMIX reports",
+  "description": "Gmail Ingestion Cloud Run service for PMIX reports",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -12,7 +12,7 @@
     "lint": "eslint src --ext .ts",
     "clean": "rm -rf dist"
   },
-  "keywords": ["gmail", "bigquery", "ingestion", "cloud-function"],
+  "keywords": ["gmail", "bigquery", "ingestion", "cloud-run"],
   "author": "",
   "license": "ISC",
   "dependencies": {

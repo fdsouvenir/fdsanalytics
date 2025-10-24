@@ -6,6 +6,7 @@ import { Validator } from '../bigquery/Validator';
 import { TimeframeConverter } from '../bigquery/TimeframeConverter';
 import { QueryAnalyticsParams, QueryAnalyticsParamsSchema } from '../schemas/paramSchemas';
 import { config } from '../config/config';
+import { PerformanceTracker } from '../analytics/PerformanceTracker';
 
 export interface QueryAnalyticsResult {
   rows: any[];
@@ -24,27 +25,41 @@ export class QueryAnalyticsTool {
   private bqClient: BigQueryClient;
   private validator: Validator;
   private timeframeConverter: TimeframeConverter;
+  private performanceTracker: PerformanceTracker;
 
-  constructor(bqClient: BigQueryClient, validator: Validator) {
+  constructor(
+    bqClient: BigQueryClient,
+    validator: Validator,
+    tenantId: string = 'senso-sushi',
+    userId?: string
+  ) {
     this.bqClient = bqClient;
     this.validator = validator;
     this.timeframeConverter = new TimeframeConverter();
+    this.performanceTracker = new PerformanceTracker();
   }
 
-  async execute(params: any): Promise<QueryAnalyticsResult> {
+  async execute(params: any, tenantId: string = 'senso-sushi', userId?: string): Promise<QueryAnalyticsResult> {
     const startTime = Date.now();
+    let resultStatus: 'success' | 'error' | 'timeout' | 'empty' = 'success';
+    let errorMessage: string | undefined;
+    let rows: any[] = [];
+    let executionTimeMs = 0;
+    let validatedParams: any;
+    let dateRange: any;
 
-    // Validate schema
-    const validatedParams = QueryAnalyticsParamsSchema.parse(params);
+    try {
+      // Validate schema
+      validatedParams = QueryAnalyticsParamsSchema.parse(params);
 
-    // Validate against live data
-    const validationResult = await this.validator.validateQueryAnalytics(validatedParams);
-    if (!validationResult.valid) {
-      throw new Error(validationResult.error || 'Validation failed');
-    }
+      // Validate against live data
+      const validationResult = await this.validator.validateQueryAnalytics(validatedParams);
+      if (!validationResult.valid) {
+        throw new Error(validationResult.error || 'Validation failed');
+      }
 
-    // Convert timeframe to dates
-    const dateRange = this.timeframeConverter.convert(validatedParams.timeframe);
+      // Convert timeframe to dates
+      dateRange = this.timeframeConverter.convert(validatedParams.timeframe);
 
     // Build parameters for stored procedure
     // IMPORTANT: Order must match stored procedure signature exactly!
@@ -85,17 +100,37 @@ export class QueryAnalyticsTool {
       order_direction: validatedParams.orderBy?.direction?.toUpperCase() || 'DESC'
     }
 
-    // Call stored procedure
-    try {
+      // Call stored procedure
       const result = await this.bqClient.callProcedure(
         `${config.bqDatasetAnalytics}.query_metrics`,
         procedureParams
       );
 
-      const executionTimeMs = Date.now() - startTime;
+      executionTimeMs = Date.now() - startTime;
+      rows = result.rows;
+
+      // Determine result status
+      if (rows.length === 0) {
+        resultStatus = 'empty';
+      } else {
+        resultStatus = 'success';
+      }
+
+      // Track performance (fire and forget - don't block response)
+      this.trackPerformance({
+        tenantId,
+        userId,
+        validatedParams,
+        dateRange,
+        executionTimeMs,
+        rowsReturned: rows.length,
+        resultStatus
+      }).catch(err => {
+        console.error('Performance tracking failed (non-blocking):', err.message);
+      });
 
       return {
-        rows: result.rows,
+        rows,
         totalRows: result.totalRows,
         executionTimeMs,
         metadata: {
@@ -107,6 +142,31 @@ export class QueryAnalyticsTool {
         }
       };
     } catch (error: any) {
+      executionTimeMs = Date.now() - startTime;
+
+      // Determine error type
+      if (error.message?.includes('timeout') || error.message?.includes('DEADLINE_EXCEEDED')) {
+        resultStatus = 'timeout';
+        errorMessage = 'Query timeout';
+      } else {
+        resultStatus = 'error';
+        errorMessage = error.message;
+      }
+
+      // Track failed query
+      this.trackPerformance({
+        tenantId,
+        userId,
+        validatedParams,
+        dateRange,
+        executionTimeMs,
+        rowsReturned: 0,
+        resultStatus,
+        errorMessage
+      }).catch(err => {
+        console.error('Performance tracking failed (non-blocking):', err.message);
+      });
+
       // Transform BigQuery errors to user-friendly messages
       if (error.message?.includes('Invalid primary_category')) {
         const categories = await this.validator.getAvailableCategories();
@@ -117,5 +177,46 @@ export class QueryAnalyticsTool {
 
       throw error;
     }
+  }
+
+  /**
+   * Track query performance (async, non-blocking)
+   */
+  private async trackPerformance(data: {
+    tenantId: string;
+    userId?: string;
+    validatedParams: any;
+    dateRange: any;
+    executionTimeMs: number;
+    rowsReturned: number;
+    resultStatus: 'success' | 'error' | 'timeout' | 'empty';
+    errorMessage?: string;
+  }): Promise<void> {
+    const daysInRange = PerformanceTracker.calculateDaysInRange(
+      data.dateRange.startDate,
+      data.dateRange.endDate
+    );
+
+    await this.performanceTracker.trackQuery({
+      tenantId: data.tenantId,
+      userId: data.userId,
+      toolName: 'query_analytics',
+      metricName: data.validatedParams.metric,
+      aggregation: data.validatedParams.aggregation,
+      primaryCategory: data.validatedParams.filters?.primaryCategory,
+      subcategory: data.validatedParams.filters?.subcategory,
+      itemName: data.validatedParams.filters?.itemName,
+      startDate: data.dateRange.startDate,
+      endDate: data.dateRange.endDate,
+      daysInRange,
+      groupByFields: data.validatedParams.groupBy?.join(','),
+      orderByField: data.validatedParams.orderBy?.field,
+      orderDirection: data.validatedParams.orderBy?.direction,
+      limitRows: data.validatedParams.limit,
+      executionTimeMs: data.executionTimeMs,
+      rowsReturned: data.rowsReturned,
+      resultStatus: data.resultStatus,
+      errorMessage: data.errorMessage
+    });
   }
 }

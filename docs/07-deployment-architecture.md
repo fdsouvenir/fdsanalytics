@@ -71,6 +71,13 @@
 └───────────────────┘
 ```
 
+**Note on Legacy Services:**
+Two legacy services from earlier implementation phases remain deployed but are not part of the V1.0 architecture:
+- `chatbot` - Original Phase 1 Google Chat integration (superseded by response-engine)
+- `insightsengine` - Phase 3 nightly analytics (still in use for pre-computed insights)
+
+These services can coexist with the new architecture during migration. Plan to deprecate `chatbot` once `response-engine` is fully validated.
+
 ---
 
 ## 2. Service Specifications
@@ -211,19 +218,20 @@ gcloud run deploy conversation-manager \
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
 ```
 
-### 2.4 Gmail Ingestion (Cloud Function Gen2)
+### 2.4 Gmail Ingestion (Cloud Run)
 
-**Name:** `gmail-ingestion`  
-**Runtime:** Node.js 20  
-**Entry Point:** `ingestReports`  
+**Name:** `gmail-ingestion`
+**Image:** `gcr.io/fdsanalytics/gmail-ingestion:latest`
+**Runtime:** Node.js 20
 
 **Resources:**
-- Memory: 512MB
+- CPU: 0.5
+- Memory: 512Mi
 - Timeout: 540s (9 minutes)
 - Min instances: 0
 - Max instances: 1
 
-**Trigger:** Pub/Sub topic `gmail-ingestion-trigger`
+**Trigger:** HTTP endpoint (invoked by Cloud Scheduler via Pub/Sub or direct HTTP)
 
 **Service Account:** `gmail-ingestion@fdsanalytics.iam.gserviceaccount.com`
 
@@ -235,16 +243,17 @@ gcloud run deploy conversation-manager \
 
 **Deploy Command:**
 ```bash
-gcloud functions deploy gmail-ingestion \
-  --gen2 \
-  --runtime nodejs20 \
-  --region us-central1 \
+gcloud run deploy gmail-ingestion \
   --source ./services/gmail-ingestion \
-  --entry-point ingestReports \
+  --region us-central1 \
   --service-account gmail-ingestion@fdsanalytics.iam.gserviceaccount.com \
-  --memory 512MB \
+  --memory 512Mi \
+  --cpu 0.5 \
   --timeout 540s \
-  --trigger-topic gmail-ingestion-trigger \
+  --min-instances 0 \
+  --max-instances 1 \
+  --ingress internal-and-cloud-load-balancing \
+  --no-allow-unauthenticated \
   --set-env-vars PROJECT_ID=fdsanalytics,ENVIRONMENT=production \
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,GMAIL_OAUTH_CREDENTIALS=GMAIL_OAUTH_CREDENTIALS:latest
 ```
