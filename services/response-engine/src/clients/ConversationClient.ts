@@ -101,10 +101,10 @@ export class ConversationClient {
       };
 
       const authHeaders = await this.getAuthHeaders();
-      const response = await this.client.post<ConversationContext>('/get-context', request, {
+      const response = await this.client.post<{ success: boolean; context: ConversationContext }>('/get-context', request, {
         headers: authHeaders
       });
-      return response.data;
+      return response.data.context;
     } catch (error: any) {
       console.warn('Failed to get conversation context, proceeding without history', {
         error: error.message,
