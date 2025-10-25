@@ -13,7 +13,7 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@google/generative-ai": "^0.24.1",
     "@google-cloud/bigquery": "^7.0.0",
     "@google-cloud/secret-manager": "^5.6.0",
     "axios": "^1.7.2",
