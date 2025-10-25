@@ -158,53 +158,19 @@ export class ResponseGenerator {
           }
         }
 
-        // Step 5: Generate chart if appropriate (don't chart empty results)
-        const rowCount = toolResult?.rows?.length || 0;
-        const shouldChart = this.enableCharts && !resultValidation.isEmpty && this.shouldGenerateChart(toolResult);
+        // Step 5: DEFER chart generation (don't block response)
+        // TODO: Implement async chart generation as follow-up message
+        // Chart generation takes 15s (buildChartSpec calls Gemini)
+        // For now, skip to get fast text responses
+        timings.buildChartSpec = 0;
+        timings.generateChartUrl = 0;
 
         console.log(JSON.stringify({
           severity: 'DEBUG',
-          message: 'Chart generation check',
+          message: 'Chart generation deferred for performance',
           enableCharts: this.enableCharts,
-          isEmpty: resultValidation.isEmpty,
-          rowCount,
-          maxDatapoints: this.maxChartDatapoints,
-          shouldChart
+          deferredForSpeed: true
         }));
-
-        if (shouldChart) {
-          const step5Start = Date.now();
-          const chartSpec = await this.buildChartSpec(
-            toolResult,
-            geminiResponse.functionCall.name,
-            input.userMessage
-          );
-          timings.buildChartSpec = Date.now() - step5Start;
-
-          console.log(JSON.stringify({
-            severity: 'DEBUG',
-            message: 'Chart spec built',
-            hasSpec: !!chartSpec,
-            chartType: chartSpec?.type
-          }));
-
-          if (chartSpec) {
-            const chartUrlStart = Date.now();
-            chartUrl = await this.chartBuilder.generateChartUrl(chartSpec);
-            chartTitle = chartSpec.title;
-            timings.generateChartUrl = Date.now() - chartUrlStart;
-
-            console.log(JSON.stringify({
-              severity: 'INFO',
-              message: 'Chart generated',
-              hasUrl: !!chartUrl,
-              title: chartTitle
-            }));
-          }
-        } else {
-          timings.buildChartSpec = 0;
-          timings.generateChartUrl = 0;
-        }
       } else {
         // No function call - use Gemini's direct response
         responseText = geminiResponse.text || 'I\'m not sure how to help with that.';

@@ -79,24 +79,18 @@ export class ResponseEngine {
         };
       }
 
-      // Step 2: Get conversation context
-      const step2Start = Date.now();
-      const context = await this.conversationClient.getContext(
-        request.userId,
-        request.threadId || request.messageId,
-        request.message,
-        this.config.maxConversationHistory
-      );
-      timings.getContext = Date.now() - step2Start;
+      // Step 2: SKIP conversation context (optimization)
+      // We don't use conversation history for tool selection (pass empty array)
+      // This saves 4-6 seconds and avoids unnecessary Gemini summarization call
+      // TODO: Re-enable if we want to use context for final response generation
+      timings.getContext = 0;
+      const context = { relevantMessages: [] }; // Empty context
 
-      // DEBUG: Check what context was retrieved
-      console.log('DEBUG: Context from Conversation Manager:', JSON.stringify({
-        userId: request.userId,
-        threadId: request.threadId || request.messageId,
-        hasContext: !!context,
-        messageCount: context?.relevantMessages?.length || 0,
-        messages: context?.relevantMessages?.slice(-3) || []
-      }, null, 2));
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Skipping conversation context for performance',
+        reason: 'Tool selection uses empty history'
+      }));
 
       // Step 3: Generate response
       const step3Start = Date.now();
