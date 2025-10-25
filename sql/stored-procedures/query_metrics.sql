@@ -199,7 +199,7 @@ BEGIN
       %s
     """,
       baseline_table,
-      REPLACE(select_fields, 'metric_value', 'baseline_value'),
+      REPLACE(select_fields, ' as metric_value', ' as baseline_value'),
       CASE
         WHEN primary_category IS NOT NULL THEN ' AND m.primary_category = @primary_category'
         ELSE ''
