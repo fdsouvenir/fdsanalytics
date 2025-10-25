@@ -246,10 +246,14 @@ export class ResponseGenerator {
    * Minimal instruction - rely on tool schema and multi-turn chat for the rest
    */
   private buildSystemInstruction(input: ResponseGeneratorInput): string {
+    const currentYear = input.currentDateTime.getFullYear();
     return `You are an analytics assistant for ${input.tenantConfig.businessName}.
 Business timezone: ${input.tenantConfig.timezone}
 Currency: ${input.tenantConfig.currency}
-Current date and time: ${input.currentDateTime.toISOString()}`;
+Current date and time: ${input.currentDateTime.toISOString()}
+Current year: ${currentYear}
+
+IMPORTANT: When users mention months without specifying a year (e.g., "May and June"), assume they mean the current year (${currentYear}) unless context suggests otherwise.`;
   }
 
   /**
