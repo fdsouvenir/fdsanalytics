@@ -638,11 +638,16 @@ export class GeminiClient {
       const functionResult = await executeFunction(functionCall.name, functionCall.args);
       const toolExecutionMs = Date.now() - toolStart;
 
+      // Log function result details
+      const resultSize = JSON.stringify(functionResult).length;
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Function executed',
         functionName: functionCall.name,
-        durationMs: toolExecutionMs
+        durationMs: toolExecutionMs,
+        resultSize,
+        resultType: typeof functionResult,
+        resultKeys: typeof functionResult === 'object' && functionResult ? Object.keys(functionResult) : []
       }));
 
       // Step 3: Send function result back to chat and handle multiple function call rounds
@@ -653,6 +658,13 @@ export class GeminiClient {
           response: functionResult
         }
       }]);
+
+      // Log the response after sending function result
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Received response after sending functionResponse',
+        hasCandidates: !!(currentResult.response.candidates && currentResult.response.candidates.length > 0)
+      }));
 
       let roundCount = 1;
       const maxRounds = 3;  // Prevent infinite loops
@@ -679,14 +691,121 @@ export class GeminiClient {
 
         if (!nextFunctionCall) {
           // No more function calls, we got text!
-          const responseText = response.text() || '';
+          let responseText = response.text() || '';
 
-          console.log(JSON.stringify({
-            severity: 'INFO',
+          // Log response details (especially for debugging empty responses)
+          const logData: any = {
+            severity: responseText.length === 0 ? 'WARNING' : 'INFO',
             message: 'Final text response received',
             rounds: roundCount,
             textLength: responseText.length
-          }));
+          };
+
+          // WORKAROUND: If empty response but we have function result, retry with explicit prompt
+          if (responseText.length === 0 && functionResult) {
+            const candidate = candidates[0];
+            logData.debugInfo = {
+              candidatesCount: candidates.length,
+              finishReason: candidate?.finishReason,
+              safetyRatings: candidate?.safetyRatings,
+              hasContent: !!candidate?.content,
+              hasParts: !!candidate?.content?.parts,
+              partsCount: candidate?.content?.parts?.length || 0,
+              contentParts: candidate?.content?.parts?.map((p: any) => ({
+                hasText: 'text' in p,
+                textValue: p.text || null,
+                hasFunctionCall: 'functionCall' in p,
+                hasFunctionResponse: 'functionResponse' in p,
+                keys: Object.keys(p)
+              })),
+              promptFeedback: (response as any).promptFeedback,
+              rawCandidate: JSON.stringify(candidate)
+            };
+
+            console.log(JSON.stringify({
+              ...logData,
+              message: 'Empty response detected, falling back to new chat session with fake history'
+            }));
+
+            try {
+              // FALLBACK: Create a NEW chat session with functionResponse in history
+              // This mimics the old "fake history" pattern that always worked
+              const fallbackModel = this.genAI.getGenerativeModel({
+                model: modelToUse,
+                systemInstruction: input.systemInstruction,
+                generationConfig: {
+                  temperature: 1,
+                  topP: 0.95
+                }
+              });
+
+              const fallbackChat = fallbackModel.startChat({
+                history: [
+                  {
+                    role: 'user',
+                    parts: [{ text: input.userMessage }]
+                  },
+                  {
+                    role: 'model',
+                    parts: [{
+                      functionCall: {
+                        name: functionCall.name,
+                        args: functionCall.args
+                      }
+                    }]
+                  },
+                  {
+                    role: 'function',
+                    parts: [{
+                      functionResponse: {
+                        name: functionCall.name,
+                        response: functionResult
+                      }
+                    }]
+                  }
+                ]
+              });
+
+              // Ask for response in new session
+              const fallbackResult = await fallbackChat.sendMessage(
+                'Please provide a natural language response based on this data.'
+              );
+              responseText = fallbackResult.response.text() || '';
+
+              console.log(JSON.stringify({
+                severity: responseText.length > 0 ? 'INFO' : 'WARNING',
+                message: 'Fallback response received',
+                fallbackTextLength: responseText.length,
+                fallbackSuccessful: responseText.length > 0
+              }));
+
+              // Update logData with fallback result
+              logData.textLength = responseText.length;
+              logData.severity = responseText.length > 0 ? 'INFO' : 'WARNING';
+              logData.usedFallback = true;
+            } catch (fallbackError: any) {
+              console.log(JSON.stringify({
+                severity: 'ERROR',
+                message: 'Fallback failed',
+                error: fallbackError.message
+              }));
+            }
+          } else if (responseText.length === 0) {
+            // No function result to work with, just log debug info
+            const candidate = candidates[0];
+            logData.debugInfo = {
+              candidatesCount: candidates.length,
+              finishReason: candidate?.finishReason,
+              safetyRatings: candidate?.safetyRatings,
+              hasContent: !!candidate?.content,
+              hasParts: !!candidate?.content?.parts,
+              partsCount: candidate?.content?.parts?.length || 0,
+              promptFeedback: (response as any).promptFeedback,
+              rawCandidate: JSON.stringify(candidate)
+            };
+          }
+
+          console.log(JSON.stringify(logData));
 
           return {
             functionCall,
@@ -709,11 +828,15 @@ export class GeminiClient {
         const nextFunctionResult = await executeFunction(nextFunctionCall.name, nextFunctionCall.args);
         const nextToolDuration = Date.now() - nextToolStart;
 
+        const nextResultSize = JSON.stringify(nextFunctionResult).length;
         console.log(JSON.stringify({
           severity: 'DEBUG',
           message: 'Additional function executed',
           functionName: nextFunctionCall.name,
-          durationMs: nextToolDuration
+          durationMs: nextToolDuration,
+          resultSize: nextResultSize,
+          resultType: typeof nextFunctionResult,
+          resultKeys: typeof nextFunctionResult === 'object' && nextFunctionResult ? Object.keys(nextFunctionResult) : []
         }));
 
         // Send the next function result
