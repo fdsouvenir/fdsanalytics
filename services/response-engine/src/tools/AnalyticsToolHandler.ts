@@ -15,6 +15,7 @@ export class AnalyticsToolHandler {
   private projectId: string;
   private dataset: string;
   private customerId: string;
+  private primaryCategoriesCache: string[] | null = null;
 
   constructor(
     projectId: string = 'fdsanalytics',
@@ -88,7 +89,7 @@ export class AnalyticsToolHandler {
     endDate: string;
     category?: string;
   }): Promise<ToolResult> {
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     // HYBRID CACHE: Check if date range is covered in insights
     const coverage = await this.checkInsightsCoverage(args.startDate, args.endDate);
@@ -152,7 +153,7 @@ export class AnalyticsToolHandler {
     endDate: string;
     category?: string;
   }): Promise<ToolResult> {
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     // HYBRID CACHE: Check if date range is covered in insights
     const coverage = await this.checkInsightsCoverage(args.startDate, args.endDate);
@@ -275,7 +276,7 @@ export class AnalyticsToolHandler {
     endDate: string;
     category?: string;
   }): Promise<ToolResult> {
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -303,7 +304,7 @@ export class AnalyticsToolHandler {
     category?: string;
     type: 'highest' | 'lowest';
   }): Promise<ToolResult> {
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -333,7 +334,7 @@ export class AnalyticsToolHandler {
   }): Promise<ToolResult> {
     // For now, get daily data and let Gemini do the comparison in text
     // Future: could add specialized stored procedure for this
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -387,7 +388,7 @@ export class AnalyticsToolHandler {
     endDate2: string;
     category?: string;
   }): Promise<ToolResult> {
-    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+    const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -407,11 +408,49 @@ export class AnalyticsToolHandler {
   }
 
   /**
+   * Get list of primary categories from BigQuery (with caching)
+   */
+  private async getPrimaryCategories(): Promise<string[]> {
+    if (this.primaryCategoriesCache) {
+      return this.primaryCategoriesCache;
+    }
+
+    try {
+      const query = `
+        SELECT DISTINCT primary_category
+        FROM \`${this.projectId}.${this.dataset}.metrics\`
+        WHERE primary_category LIKE '(%'
+        ORDER BY primary_category
+      `;
+
+      const [rows] = await this.bqClient.query({
+        query,
+        location: 'us-central1',
+        jobTimeoutMs: 5000
+      });
+
+      this.primaryCategoriesCache = rows.map((row: any) => row.primary_category);
+
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Primary categories cached',
+        count: this.primaryCategoriesCache.length
+      }));
+
+      return this.primaryCategoriesCache;
+    } catch (error: any) {
+      console.warn('Failed to fetch primary categories, using empty list:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Parse category string into primary/sub category
    * Categories in parentheses like "(Beer)" are primary categories
    * Others like "Bottle Beer" are subcategories
+   * Smart matching: "Sushi" → "(Sushi)" if it matches a known primary category
    */
-  private parseCategory(category?: string): { primaryCategory: string | null; subcategory: string | null } {
+  private async parseCategory(category?: string): Promise<{ primaryCategory: string | null; subcategory: string | null }> {
     if (!category) {
       return { primaryCategory: null, subcategory: null };
     }
@@ -419,6 +458,25 @@ export class AnalyticsToolHandler {
     // Check if it's a primary category (in parentheses)
     if (category.startsWith('(') && category.endsWith(')')) {
       return { primaryCategory: category, subcategory: null };
+    }
+
+    // Smart matching: check if input matches a known primary category
+    const primaryCategories = await this.getPrimaryCategories();
+    const normalizedInput = category.toLowerCase().trim();
+
+    for (const primaryCat of primaryCategories) {
+      // Remove parentheses for comparison: "(Sushi)" → "sushi"
+      const normalizedPrimary = primaryCat.replace(/[()]/g, '').toLowerCase().trim();
+
+      if (normalizedInput === normalizedPrimary) {
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Smart category match',
+          input: category,
+          matched: primaryCat
+        }));
+        return { primaryCategory: primaryCat, subcategory: null };
+      }
     }
 
     // Otherwise it's a subcategory
