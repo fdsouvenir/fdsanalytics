@@ -185,10 +185,7 @@ export class GeminiClient {
         },
         generationConfig: {
           temperature: 1,
-          topP: 0.95,
-          // Disable thinking mode for faster responses
-          // This is critical for flash-lite performance
-          responseModalities: ['TEXT']
+          topP: 0.95
         }
       };
 
@@ -197,8 +194,8 @@ export class GeminiClient {
 
         // Force function calling mode for faster tool selection
         // Mode 'ANY' eliminates "should I call a function?" decision step
-        modelConfig.tool_config = {
-          function_calling_config: {
+        modelConfig.toolConfig = {
+          functionCallingConfig: {
             mode: 'ANY'
           }
         };
@@ -206,13 +203,22 @@ export class GeminiClient {
 
       const model = this.genAI.getGenerativeModel(modelConfig);
 
-      // Start chat with history
-      const chat = model.startChat({
-        history: history
-      });
+      let result;
 
-      // Send new message
-      const result = await chat.sendMessage(input.userMessage);
+      // Optimization: Use direct generateContent() when history is empty (faster)
+      // This matches AI Studio behavior and eliminates chat session overhead
+      if (history.length === 0) {
+        result = await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: input.userMessage }] }]
+        });
+      } else {
+        // Use chat API when we have history
+        const chat = model.startChat({
+          history: history
+        });
+        result = await chat.sendMessage(input.userMessage);
+      }
+
       const response = result.response;
 
       // Check for function call
