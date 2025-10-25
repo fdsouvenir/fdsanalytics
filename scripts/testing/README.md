@@ -2,6 +2,113 @@
 
 This directory contains automated testing scripts for the FDS Analytics services.
 
+## test-all-intent-functions.sh
+
+**Comprehensive test suite that validates all 8 intent functions** with multiple test queries per function.
+
+### Features
+
+- **Complete coverage**: Tests all 8 intent functions with 30+ realistic queries
+- **Per-function statistics**: Tracks success/failure rates for each intent function
+- **Continuous monitoring**: Optional continuous mode for long-term monitoring
+- **JSON-driven**: Test queries defined in `test-queries.json` for easy maintenance
+- **Detailed reporting**: Function breakdown with success rates and fallback usage
+- **Flexible filtering**: Test specific functions or all functions
+
+### Usage
+
+```bash
+# Run all tests (30 queries across 8 functions)
+./scripts/testing/test-all-intent-functions.sh
+
+# Test only a specific function
+./scripts/testing/test-all-intent-functions.sh --function compare_periods
+
+# Continuous monitoring mode
+./scripts/testing/test-all-intent-functions.sh --continuous
+
+# Test specific revision
+./scripts/testing/test-all-intent-functions.sh --revision response-engine-00065-2pv
+
+# Customize settings
+./scripts/testing/test-all-intent-functions.sh --output-dir /tmp/tests --wait-time 15
+
+# Show help
+./scripts/testing/test-all-intent-functions.sh --help
+```
+
+### Test Coverage
+
+All 8 intent functions with 3-4 queries each:
+
+1. **show_daily_sales** - Daily sales breakdowns
+2. **show_top_items** - Best-selling items analysis
+3. **show_category_breakdown** - Category performance
+4. **get_total_sales** - Total revenue queries
+5. **find_peak_day** - Best/worst day identification
+6. **compare_day_types** - Weekday vs weekend comparisons
+7. **track_item_performance** - Item trend tracking
+8. **compare_periods** - Period-over-period comparisons (including item comparisons)
+
+### Output
+
+Results saved to `test-results/run-<timestamp>/`:
+
+- `test-<id>-<function>.json` - Individual test logs
+- `SUMMARY.md` - Comprehensive summary with function breakdown
+
+### Example Output
+
+```
+╔════════════════════════════════════════════════════╗
+║  Intent Function Comprehensive Test Suite         ║
+║  Run #1                                           ║
+╚════════════════════════════════════════════════════╝
+
+Service:    https://response-engine-111874159771.us-central1.run.app
+Revision:   response-engine-00065-2pv
+Output Dir: ./test-results/run-20251025-143000
+Time:       Sat Oct 25 02:30:00 PM CDT 2025
+
+═══════════════════════════════════════════════════
+Testing: compare_periods
+═══════════════════════════════════════════════════
+
+────────────────────────────────────────
+Test 25: compare_periods
+Query: compare May and June 2025 sales
+────────────────────────────────────────
+✓ SUCCESS (textLength: 245)
+  ℹ Fallback pattern used
+
+...
+
+╔════════════════════════════════════════════════════╗
+║  TEST SUMMARY                                      ║
+╚════════════════════════════════════════════════════╝
+
+Total Tests:      30
+Successful:       29
+Failed:           1
+Fallback Used:    8
+Success Rate:     96.7%
+
+Function Breakdown:
+  show_daily_sales          3/3 (100.0%)
+  show_top_items            4/4 (100.0%)
+  show_category_breakdown   3/3 (100.0%)
+  get_total_sales           4/4 (100.0%)
+  find_peak_day             4/4 (100.0%)
+  compare_day_types         3/3 (100.0%)
+  track_item_performance    4/4 (100.0%)
+  compare_periods           4/5 (80.0%)
+```
+
+### Exit Codes
+
+- `0` - All tests passed
+- `1` - One or more tests failed
+
 ## test-response-engine.sh
 
 Automated test harness for testing the response-engine service with various queries.

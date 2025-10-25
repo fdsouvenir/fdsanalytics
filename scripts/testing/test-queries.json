@@ -1,0 +1,82 @@
+{
+  "description": "Comprehensive test queries for all 8 intent functions",
+  "intentFunctions": {
+    "show_daily_sales": {
+      "description": "Show sales broken down by day for a date range",
+      "queries": [
+        "show me daily sales for the last week",
+        "daily beer sales from May 1 to May 31, 2025",
+        "day by day sushi sales in July 2025"
+      ]
+    },
+    "show_top_items": {
+      "description": "Show top N best-selling items",
+      "queries": [
+        "what were the top 10 items last month",
+        "show me the 5 best selling sushi items in June 2025",
+        "top 20 items in Q2 2025",
+        "best selling beer items this month"
+      ]
+    },
+    "show_category_breakdown": {
+      "description": "Show sales broken down by category",
+      "queries": [
+        "sales by category in July 2025",
+        "category breakdown for last quarter",
+        "which categories sold most in June 2025"
+      ]
+    },
+    "get_total_sales": {
+      "description": "Get total sales for a period",
+      "queries": [
+        "what were total sales in May 2025",
+        "how much revenue did we make last month",
+        "total sushi sales in July 2025",
+        "overall beer sales for Q2 2025"
+      ]
+    },
+    "find_peak_day": {
+      "description": "Find the day with highest or lowest sales",
+      "queries": [
+        "what was our best day in July 2025",
+        "worst sales day last month",
+        "highest sushi sales day in June 2025",
+        "slowest day for beer sales in May 2025"
+      ]
+    },
+    "compare_day_types": {
+      "description": "Compare sales between different day types",
+      "queries": [
+        "compare weekday vs weekend sales in July 2025",
+        "Fridays vs Saturdays in June 2025",
+        "weekday vs weekend sushi sales last month"
+      ]
+    },
+    "track_item_performance": {
+      "description": "Track performance of a specific item over time",
+      "queries": [
+        "how is Salmon Roll selling this month",
+        "track Spicy Tuna sales from May to July 2025",
+        "California Roll performance in June 2025",
+        "Edamame sales trend last quarter"
+      ]
+    },
+    "compare_periods": {
+      "description": "Compare sales between two time periods (with optional item support)",
+      "queries": [
+        "compare May and June 2025 sales",
+        "May vs June sushi sales",
+        "compare Q1 and Q2 2025",
+        "compare Salmon Roll sales May vs June 2025",
+        "how did Spicy Tuna perform April vs May 2025"
+      ]
+    }
+  },
+  "metadata": {
+    "totalQueries": 30,
+    "functionsCount": 8,
+    "averageQueriesPerFunction": 3.75,
+    "generatedDate": "2025-10-25",
+    "purpose": "Comprehensive testing of all intent functions with realistic user queries"
+  }
+}
