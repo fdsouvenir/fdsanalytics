@@ -120,6 +120,15 @@ export class ResponseGenerator {
 
       // Step 3: Execute intent function if Gemini requested one
       if (geminiResponse.functionCall) {
+        // DEBUG: Log extracted function call details
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Gemini extracted function call',
+          functionName: geminiResponse.functionCall.name,
+          extractedParameters: geminiResponse.functionCall.args,
+          userMessage: input.userMessage
+        }, null, 2));
+
         const toolStartTime = Date.now();
         const toolResult = await this.analyticsToolHandler.execute(
           geminiResponse.functionCall.name,

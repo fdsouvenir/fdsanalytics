@@ -61,13 +61,36 @@ export class GeminiClient {
    */
   async initialize(): Promise<void> {
     if (this.genAI) {
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'GeminiClient already initialized, skipping'
+      }));
       return; // Already initialized
     }
 
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'GeminiClient not initialized, loading from Secret Manager'
+    }));
+
     try {
+      const loadStart = Date.now();
       this.apiKey = await this.loadApiKey();
+      const loadDuration = Date.now() - loadStart;
+
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'API key loaded from Secret Manager',
+        durationMs: loadDuration
+      }));
+
       this.genAI = new GoogleGenerativeAI(this.apiKey);
       this.model = this.genAI.getGenerativeModel({ model: this.modelName });
+
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'GeminiClient initialization complete'
+      }));
     } catch (error: any) {
       console.error('Failed to initialize GeminiClient', { error: error.message });
       throw new Error('Failed to initialize Gemini API');
@@ -75,9 +98,26 @@ export class GeminiClient {
   }
 
   /**
-   * Load Gemini API key from Secret Manager
+   * Load Gemini API key from environment variable or Secret Manager
+   * Prioritizes environment variable for faster startup (0ms vs 50s)
    */
   private async loadApiKey(): Promise<string> {
+    // Check for environment variable first (fast path)
+    const envApiKey = process.env.GEMINI_API_KEY;
+    if (envApiKey) {
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'API key loaded from environment variable'
+      }));
+      return envApiKey;
+    }
+
+    // Fall back to Secret Manager (slow path - 50s)
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'No GEMINI_API_KEY env var, falling back to Secret Manager'
+    }));
+
     try {
       const client = new SecretManagerServiceClient();
       const secretPath = `projects/${this.projectId}/secrets/${this.geminiSecretName}/versions/latest`;
@@ -148,7 +188,15 @@ export class GeminiClient {
     input: GenerateChatResponseInput,
     modelOverride?: string
   ): Promise<GenerateResponseOutput> {
+    const initStart = Date.now();
     await this.initialize();
+    const initDuration = Date.now() - initStart;
+
+    console.log(JSON.stringify({
+      severity: 'DEBUG',
+      message: 'Gemini initialization completed',
+      durationMs: initDuration
+    }));
 
     if (!this.genAI) {
       throw new Error('Gemini not initialized');
@@ -167,6 +215,7 @@ export class GeminiClient {
         }));
       }
 
+      const prepStart = Date.now();
       // Convert conversation history to Gemini format
       const history = this.convertToGeminiHistory(input.conversationHistory);
 
@@ -201,12 +250,38 @@ export class GeminiClient {
         };
       }
 
+      const prepDuration = Date.now() - prepStart;
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Function declarations prepared',
+        durationMs: prepDuration,
+        functionCount: functionDeclarations.length
+      }));
+
+      const modelStart = Date.now();
       const model = this.genAI.getGenerativeModel(modelConfig);
+      const modelDuration = Date.now() - modelStart;
+
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Generative model created',
+        durationMs: modelDuration
+      }));
 
       let result;
 
       // Optimization: Use direct generateContent() when history is empty (faster)
       // This matches AI Studio behavior and eliminates chat session overhead
+      const apiCallStart = Date.now();
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Starting Gemini API call',
+        model: modelToUse,
+        hasHistory: history.length > 0,
+        functionCount: functionDeclarations.length,
+        messageLength: input.userMessage.length
+      }));
+
       if (history.length === 0) {
         result = await model.generateContent({
           contents: [{ role: 'user', parts: [{ text: input.userMessage }] }]
@@ -219,6 +294,16 @@ export class GeminiClient {
         result = await chat.sendMessage(input.userMessage);
       }
 
+      const apiCallDuration = Date.now() - apiCallStart;
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Gemini API call completed',
+        model: modelToUse,
+        durationMs: apiCallDuration,
+        hasHistory: history.length > 0
+      }));
+
+      const parseStart = Date.now();
       const response = result.response;
 
       // Check for function call
@@ -226,6 +311,13 @@ export class GeminiClient {
       if (candidates.length > 0 && candidates[0].content?.parts) {
         for (const part of candidates[0].content.parts) {
           if (part.functionCall) {
+            const parseDuration = Date.now() - parseStart;
+            console.log(JSON.stringify({
+              severity: 'DEBUG',
+              message: 'Response parsed (function call found)',
+              durationMs: parseDuration
+            }));
+
             return {
               functionCall: {
                 name: part.functionCall.name,
@@ -237,6 +329,13 @@ export class GeminiClient {
       }
 
       // No function call, return text
+      const parseDuration = Date.now() - parseStart;
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Response parsed (text response)',
+        durationMs: parseDuration
+      }));
+
       return {
         text: response.text?.() || ''
       };

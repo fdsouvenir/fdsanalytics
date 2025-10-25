@@ -14,10 +14,16 @@ export class AnalyticsToolHandler {
   private bqClient: BigQuery;
   private projectId: string;
   private dataset: string;
+  private customerId: string;
 
-  constructor(projectId: string = 'fdsanalytics', dataset: string = 'restaurant_analytics') {
+  constructor(
+    projectId: string = 'fdsanalytics',
+    dataset: string = 'restaurant_analytics',
+    customerId: string = 'senso-sushi'
+  ) {
     this.projectId = projectId;
     this.dataset = dataset;
+    this.customerId = customerId;
     this.bqClient = new BigQuery({ projectId });
   }
 
@@ -72,7 +78,7 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Show daily sales - calls query_metrics stored procedure
+   * Show daily sales - HYBRID CACHE (fast path from insights, slow path from query_metrics)
    */
   private async showDailySales(args: {
     startDate: string;
@@ -80,6 +86,42 @@ export class AnalyticsToolHandler {
     category?: string;
   }): Promise<ToolResult> {
     const { primaryCategory, subcategory } = this.parseCategory(args.category);
+
+    // HYBRID CACHE: Check if date range is covered in insights
+    const coverage = await this.checkInsightsCoverage(args.startDate, args.endDate);
+
+    // FAST PATH: Use insights cache if fully covered
+    if (coverage.isFullyCovered) {
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Using FAST PATH (insights cache) for show_daily_sales',
+        startDate: args.startDate,
+        endDate: args.endDate,
+        coveragePercent: coverage.coveragePercent
+      }));
+
+      return this.callStoredProcedure(
+        'sp_get_daily_summary',
+        {
+          start_date: args.startDate,
+          end_date: args.endDate,
+          customer_id: this.customerId,
+          primary_category: primaryCategory,
+          subcategory: subcategory
+        },
+        'insights'
+      );
+    }
+
+    // SLOW PATH: Fall back to raw metrics aggregation
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'Using SLOW PATH (query_metrics) for show_daily_sales',
+      startDate: args.startDate,
+      endDate: args.endDate,
+      coveragePercent: coverage.coveragePercent,
+      reason: 'Date range not fully cached'
+    }));
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -99,7 +141,7 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Show top items
+   * Show top items - HYBRID CACHE (fast path from insights, slow path from query_metrics)
    */
   private async showTopItems(args: {
     limit: number;
@@ -108,6 +150,43 @@ export class AnalyticsToolHandler {
     category?: string;
   }): Promise<ToolResult> {
     const { primaryCategory, subcategory } = this.parseCategory(args.category);
+
+    // HYBRID CACHE: Check if date range is covered in insights
+    const coverage = await this.checkInsightsCoverage(args.startDate, args.endDate);
+
+    // FAST PATH: Use insights cache if fully covered
+    if (coverage.isFullyCovered) {
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Using FAST PATH (insights cache) for show_top_items',
+        startDate: args.startDate,
+        endDate: args.endDate,
+        coveragePercent: coverage.coveragePercent
+      }));
+
+      return this.callStoredProcedure(
+        'sp_get_top_items_from_insights',
+        {
+          start_date: args.startDate,
+          end_date: args.endDate,
+          customer_id: this.customerId,
+          primary_category: primaryCategory,
+          subcategory: subcategory,
+          item_limit: args.limit
+        },
+        'insights'
+      );
+    }
+
+    // SLOW PATH: Fall back to raw metrics aggregation
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'Using SLOW PATH (query_metrics) for show_top_items',
+      startDate: args.startDate,
+      endDate: args.endDate,
+      coveragePercent: coverage.coveragePercent,
+      reason: 'Date range not fully cached'
+    }));
 
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
@@ -127,13 +206,47 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Show category breakdown
+   * Show category breakdown - HYBRID CACHE (fast path from insights, slow path from query_metrics)
    */
   private async showCategoryBreakdown(args: {
     startDate: string;
     endDate: string;
     includeBeer?: boolean;
   }): Promise<ToolResult> {
+    // HYBRID CACHE: Check if date range is covered in insights
+    const coverage = await this.checkInsightsCoverage(args.startDate, args.endDate);
+
+    // FAST PATH: Use insights cache if fully covered
+    if (coverage.isFullyCovered) {
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Using FAST PATH (insights cache) for show_category_breakdown',
+        startDate: args.startDate,
+        endDate: args.endDate,
+        coveragePercent: coverage.coveragePercent
+      }));
+
+      return this.callStoredProcedure(
+        'sp_get_category_trends',
+        {
+          start_date: args.startDate,
+          end_date: args.endDate,
+          customer_id: this.customerId
+        },
+        'insights'
+      );
+    }
+
+    // SLOW PATH: Fall back to raw metrics aggregation
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'Using SLOW PATH (query_metrics) for show_category_breakdown',
+      startDate: args.startDate,
+      endDate: args.endDate,
+      coveragePercent: coverage.coveragePercent,
+      reason: 'Date range not fully cached'
+    }));
+
     return this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
       start_date: args.startDate,
@@ -281,11 +394,62 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Call a BigQuery stored procedure
+   * Check if date range is covered in insights cache
+   */
+  private async checkInsightsCoverage(
+    startDate: string,
+    endDate: string
+  ): Promise<{ isFullyCovered: boolean; coveragePercent: number }> {
+    const checkStart = Date.now();
+
+    try {
+      const query = `
+        DECLARE result_table STRING;
+        CALL \`${this.projectId}.insights.sp_check_insights_coverage\`(
+          DATE('${startDate}'),
+          DATE('${endDate}'),
+          '${this.customerId}',
+          result_table
+        );
+        EXECUTE IMMEDIATE FORMAT('SELECT is_fully_covered, coverage_percent FROM %s', result_table);
+      `;
+
+      const [rows] = await this.bqClient.query({
+        query,
+        location: 'us-central1',
+        jobTimeoutMs: 10000
+      });
+
+      const result = rows[0];
+      const checkDuration = Date.now() - checkStart;
+
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Checked insights cache coverage',
+        startDate,
+        endDate,
+        isFullyCovered: result.is_fully_covered,
+        coveragePercent: result.coverage_percent,
+        checkDurationMs: checkDuration
+      }));
+
+      return {
+        isFullyCovered: result.is_fully_covered,
+        coveragePercent: parseFloat(result.coverage_percent) || 0
+      };
+    } catch (error: any) {
+      console.warn('Failed to check insights coverage, defaulting to slow path:', error.message);
+      return { isFullyCovered: false, coveragePercent: 0 };
+    }
+  }
+
+  /**
+   * Call a BigQuery stored procedure (generic)
    */
   private async callStoredProcedure(
     procedureName: string,
-    params: Record<string, any>
+    params: Record<string, any>,
+    dataset: string = this.dataset
   ): Promise<ToolResult> {
     const startTime = Date.now();
 
@@ -296,7 +460,7 @@ export class AnalyticsToolHandler {
 
       const callStatement = `
         DECLARE result_table STRING;
-        CALL \`${this.projectId}.${this.dataset}.${procedureName}\`(
+        CALL \`${this.projectId}.${dataset}.${procedureName}\`(
           ${paramPlaceholders},
           result_table
         );
