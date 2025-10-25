@@ -102,64 +102,68 @@ export class ResponseGenerator {
         systemInstructionLength: systemInstruction.length
       }, null, 2));
 
-      // Step 2: Ask Gemini which intent function to call
-      // Use gemini-2.5-flash-lite for ultra-fast tool selection (<1s vs 100s)
-      // CRITICAL: Empty history for speed - matches AI Studio test setup
+      // Step 2: Use continuous chat for function calling (ONE Gemini session)
+      // This eliminates the "fake history" overhead of two separate API calls
+      // Use gemini-2.5-flash-lite for ultra-fast processing
       const step2Start = Date.now();
-      const geminiResponse = await this.geminiClient.generateChatResponse({
+
+      const chatResult = await this.geminiClient.generateWithFunctionCalling({
         userMessage: input.userMessage,
         systemInstruction: systemInstruction,
-        conversationHistory: [],  // Empty history for fast tool selection
+        conversationHistory: [],  // Empty history for speed
         availableFunctions: INTENT_FUNCTIONS.map(fn => ({
           name: fn.name,
           description: fn.description,
           parameters: fn.parameters
         }))
-      }, 'gemini-2.5-flash-lite');  // Use flash-lite for maximum speed
-      timings.geminiToolSelection = Date.now() - step2Start;
-
-      // Step 3: Execute intent function if Gemini requested one
-      if (geminiResponse.functionCall) {
-        // DEBUG: Log extracted function call details
+      }, async (functionName: string, functionArgs: Record<string, any>) => {
+        // This callback executes the function within the continuous chat
         console.log(JSON.stringify({
           severity: 'DEBUG',
-          message: 'Gemini extracted function call',
-          functionName: geminiResponse.functionCall.name,
-          extractedParameters: geminiResponse.functionCall.args,
+          message: 'Executing function in continuous chat',
+          functionName: functionName,
+          extractedParameters: functionArgs,
           userMessage: input.userMessage
         }, null, 2));
 
-        const toolStartTime = Date.now();
-        const toolResult = await this.analyticsToolHandler.execute(
-          geminiResponse.functionCall.name,
-          geminiResponse.functionCall.args
-        );
-        const toolDuration = Date.now() - toolStartTime;
-        timings.intentFunctionExecution = toolDuration;
+        return await this.analyticsToolHandler.execute(functionName, functionArgs);
+      }, 'gemini-2.5-flash-lite');  // Use flash-lite for both steps
 
+      const totalGeminiDuration = Date.now() - step2Start;
+
+      // Extract timings from continuous chat
+      timings.geminiContinuousChat = totalGeminiDuration;
+      timings.intentFunctionExecution = chatResult.toolExecutionMs || 0;
+
+      // Log continuous chat completion
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Continuous chat completed',
+        totalDurationMs: totalGeminiDuration,
+        toolExecutionMs: chatResult.toolExecutionMs || 0,
+        geminiOnlyMs: totalGeminiDuration - (chatResult.toolExecutionMs || 0)
+      }));
+
+      // Step 3: Handle result
+      if (chatResult.functionCall && chatResult.functionResult) {
+        // Function was called
         toolCalls.push({
-          toolName: geminiResponse.functionCall.name,
-          parameters: geminiResponse.functionCall.args,
-          result: toolResult,
-          durationMs: toolDuration
+          toolName: chatResult.functionCall.name,
+          parameters: chatResult.functionCall.args,
+          result: chatResult.functionResult,
+          durationMs: chatResult.toolExecutionMs || 0
         });
 
         // Validate query result
-        const resultValidation = this.validateQueryResult(toolResult, geminiResponse.functionCall.args);
+        const resultValidation = this.validateQueryResult(
+          chatResult.functionResult,
+          chatResult.functionCall.args
+        );
 
-        // Step 4: Send tool result back to Gemini for final response
         if (resultValidation.isEmpty) {
-          responseText = this.formatEmptyResultResponse(geminiResponse.functionCall.args);
-          timings.geminiFinalResponse = 0;
+          responseText = this.formatEmptyResultResponse(chatResult.functionCall.args);
         } else {
-          const step4Start = Date.now();
-          responseText = await this.geminiClient.generateFinalResponse(
-            input.userMessage,
-            geminiResponse.functionCall.name,
-            toolResult
-            // Use default gemini-2.5-pro for high-quality final responses
-          );
-          timings.geminiFinalResponse = Date.now() - step4Start;
+          responseText = chatResult.responseText;
 
           // Add result validation warnings
           if (resultValidation.warning) {
@@ -167,10 +171,7 @@ export class ResponseGenerator {
           }
         }
 
-        // Step 5: DEFER chart generation (don't block response)
-        // TODO: Implement async chart generation as follow-up message
-        // Chart generation takes 15s (buildChartSpec calls Gemini)
-        // For now, skip to get fast text responses
+        // Chart generation deferred for performance
         timings.buildChartSpec = 0;
         timings.generateChartUrl = 0;
 
@@ -181,8 +182,8 @@ export class ResponseGenerator {
           deferredForSpeed: true
         }));
       } else {
-        // No function call - use Gemini's direct response
-        responseText = geminiResponse.text || 'I\'m not sure how to help with that.';
+        // No function call - direct response
+        responseText = chatResult.responseText;
       }
     } catch (error: any) {
       console.error('Error generating response', {
@@ -199,19 +200,18 @@ export class ResponseGenerator {
       severity: 'INFO',
       message: 'ResponseGenerator.generate() completed',
       totalDurationMs: totalDuration,
-      architecture: 'intent-based',
+      architecture: 'continuous-chat',
       models: {
-        toolSelection: 'gemini-2.5-flash-lite',
-        finalResponse: 'gemini-2.5-pro'
+        continuousChat: 'gemini-2.5-flash-lite'
       },
       timings: {
         buildContext: timings.buildContext || 0,
-        geminiToolSelection: timings.geminiToolSelection || 0,
+        geminiContinuousChat: timings.geminiContinuousChat || 0,
         intentFunctionExecution: timings.intentFunctionExecution || 0,
-        geminiFinalResponse: timings.geminiFinalResponse || 0,
         buildChartSpec: timings.buildChartSpec || 0,
         generateChartUrl: timings.generateChartUrl || 0
       },
+      geminiOnlyMs: (timings.geminiContinuousChat || 0) - (timings.intentFunctionExecution || 0),
       toolCallsCount: toolCalls.length,
       chartGenerated: chartUrl !== null
     }));

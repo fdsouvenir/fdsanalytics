@@ -21,7 +21,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter like "(Beer)" for primary category or "Bottle Beer" for subcategory'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food, Bottle Beer, Signature Rolls'
         }
       },
       required: ['startDate', 'endDate']
@@ -47,7 +47,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter to show top items within that category'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food'
         }
       },
       required: ['limit', 'startDate', 'endDate']
@@ -91,7 +91,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter to get total for specific category'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food'
         }
       },
       required: ['startDate', 'endDate']
@@ -113,7 +113,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food'
         },
         type: {
           type: SchemaType.STRING,
@@ -143,7 +143,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food'
         }
       },
       required: ['startDate', 'endDate', 'comparison']
@@ -195,7 +195,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         },
         category: {
           type: SchemaType.STRING,
-          description: 'Optional category filter like "(Sushi)" for primary category or "Signature Rolls" for subcategory'
+          description: 'Optional category filter. Examples: Sushi, Beer, Food, Bottle Beer, Signature Rolls'
         }
       },
       required: ['startDate1', 'endDate1', 'startDate2', 'endDate2']

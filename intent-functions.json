@@ -1,0 +1,228 @@
+[
+  {
+    "name": "show_daily_sales",
+    "description": "Show sales broken down by day for a date range. Use for queries like \"sales from X to Y\", \"day to day sales\", \"daily breakdown\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter like \"(Beer)\" for primary category or \"Bottle Beer\" for subcategory"
+        }
+      },
+      "required": [
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  {
+    "name": "show_top_items",
+    "description": "Show top N best-selling items. Use for queries like \"top 10 items\", \"best sellers\", \"highest sales items\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "description": "Number of top items to show (e.g., 5, 10, 20)"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter to show top items within that category"
+        }
+      },
+      "required": [
+        "limit",
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  {
+    "name": "show_category_breakdown",
+    "description": "Show sales broken down by category. Use for queries like \"sales by category\", \"category breakdown\", \"which categories sold most\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "includeBeer": {
+          "type": "boolean",
+          "description": "Whether to include beer categories (default true)"
+        }
+      },
+      "required": [
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  {
+    "name": "get_total_sales",
+    "description": "Get total sales for a period. Use for queries like \"total sales\", \"how much did we make\", \"revenue for\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter to get total for specific category"
+        }
+      },
+      "required": [
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  {
+    "name": "find_peak_day",
+    "description": "Find the day with highest or lowest sales in a period. Use for queries like \"best day\", \"worst day\", \"highest sales day\", \"slowest day\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter"
+        },
+        "type": {
+          "type": "string",
+          "description": "Whether to find highest or lowest day"
+        }
+      },
+      "required": [
+        "startDate",
+        "endDate",
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "compare_day_types",
+    "description": "Compare sales between different day types (weekday vs weekend, or specific days). Use for queries like \"weekends vs weekdays\", \"Fridays vs Saturdays\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        },
+        "comparison": {
+          "type": "string",
+          "description": "Type of day comparison"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter"
+        }
+      },
+      "required": [
+        "startDate",
+        "endDate",
+        "comparison"
+      ]
+    }
+  },
+  {
+    "name": "track_item_performance",
+    "description": "Track performance of a specific item over time. Use for queries like \"how is [item] selling\", \"track [item] sales\", \"[item] performance\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "itemName": {
+          "type": "string",
+          "description": "Name of the item to track"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date in YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in YYYY-MM-DD format"
+        }
+      },
+      "required": [
+        "itemName",
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  {
+    "name": "compare_periods",
+    "description": "Compare sales between two separate time periods (months, weeks, or custom date ranges). Use for queries like \"compare May and June\", \"May vs June\", \"this month vs last month\", \"Q1 vs Q2\", \"week 1 vs week 2\"",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "startDate1": {
+          "type": "string",
+          "description": "Start date of first period in YYYY-MM-DD format"
+        },
+        "endDate1": {
+          "type": "string",
+          "description": "End date of first period in YYYY-MM-DD format"
+        },
+        "startDate2": {
+          "type": "string",
+          "description": "Start date of second period in YYYY-MM-DD format"
+        },
+        "endDate2": {
+          "type": "string",
+          "description": "End date of second period in YYYY-MM-DD format"
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category filter like \"(Sushi)\" for primary category or \"Signature Rolls\" for subcategory"
+        }
+      },
+      "required": [
+        "startDate1",
+        "endDate1",
+        "startDate2",
+        "endDate2"
+      ]
+    }
+  }
+]
