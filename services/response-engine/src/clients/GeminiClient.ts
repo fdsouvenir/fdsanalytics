@@ -650,7 +650,10 @@ export class GeminiClient {
       let currentResult = await chat.sendMessage([{
         functionResponse: {
           name: functionCall.name,
-          response: functionResult
+          response: {
+            name: functionCall.name,
+            content: functionResult
+          }
         }
       }]);
 
@@ -720,7 +723,10 @@ export class GeminiClient {
         currentResult = await chat.sendMessage([{
           functionResponse: {
             name: nextFunctionCall.name,
-            response: nextFunctionResult
+            response: {
+              name: nextFunctionCall.name,
+              content: nextFunctionResult
+            }
           }
         }]);
 
