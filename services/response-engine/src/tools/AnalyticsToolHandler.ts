@@ -379,7 +379,7 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Compare two time periods
+   * Compare two time periods (optionally for a specific item)
    */
   private async comparePeriods(args: {
     startDate1: string;
@@ -387,6 +387,7 @@ export class AnalyticsToolHandler {
     startDate2: string;
     endDate2: string;
     category?: string;
+    itemName?: string;
   }): Promise<ToolResult> {
     const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
@@ -396,7 +397,7 @@ export class AnalyticsToolHandler {
       end_date: args.endDate1,
       primary_category: primaryCategory,
       subcategory: subcategory,
-      item_name: null,
+      item_name: args.itemName || null,
       aggregation: 'SUM',
       group_by_fields: null,
       baseline_start_date: args.startDate2,

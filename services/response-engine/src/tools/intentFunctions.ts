@@ -173,7 +173,7 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
   },
   {
     name: 'compare_periods',
-    description: 'Compare sales between two separate time periods (months, weeks, or custom date ranges). Use for queries like "compare May and June", "May vs June", "this month vs last month", "Q1 vs Q2", "week 1 vs week 2"',
+    description: 'Compare sales between two separate time periods (months, weeks, or custom date ranges) for overall sales, categories, or specific items. Use for queries like "compare May and June", "May vs June", "this month vs last month", "Q1 vs Q2", "salmon roll sales May vs June"',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
@@ -196,6 +196,10 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
         category: {
           type: SchemaType.STRING,
           description: 'Optional category filter. Examples: Sushi, Beer, Food, Bottle Beer, Signature Rolls'
+        },
+        itemName: {
+          type: SchemaType.STRING,
+          description: 'Optional specific item name to compare. Examples: "Salmon Roll", "Spicy Tuna", "Edamame". Use when comparing a specific item across periods.'
         }
       },
       required: ['startDate1', 'endDate1', 'startDate2', 'endDate2']
