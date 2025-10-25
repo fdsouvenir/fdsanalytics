@@ -62,13 +62,16 @@ export class ResponseEngine {
    */
   async handleMessage(request: ChatMessageRequest): Promise<ChatMessageResponse> {
     const startTime = Date.now();
+    const timings: Record<string, number> = {};
 
     try {
       // Step 1: Resolve tenant
+      const step1Start = Date.now();
       const tenantConfig = await this.tenantResolver.resolveTenant(
         request.workspaceId,
         request.userId
       );
+      timings.resolveTenant = Date.now() - step1Start;
 
       if (!tenantConfig) {
         return {
@@ -76,13 +79,15 @@ export class ResponseEngine {
         };
       }
 
-      // Step 2: Get conversation context (with fallback)
+      // Step 2: Get conversation context
+      const step2Start = Date.now();
       const context = await this.conversationClient.getContext(
         request.userId,
         request.threadId || request.messageId,
         request.message,
         this.config.maxConversationHistory
       );
+      timings.getContext = Date.now() - step2Start;
 
       // DEBUG: Check what context was retrieved
       console.log('DEBUG: Context from Conversation Manager:', JSON.stringify({
@@ -93,49 +98,64 @@ export class ResponseEngine {
         messages: context?.relevantMessages?.slice(-3) || []
       }, null, 2));
 
-      // Step 3: Get available categories from MCP
-      const availableCategories = await this.getAvailableCategories();
-
-      // Step 4: Generate response
+      // Step 3: Generate response
+      const step3Start = Date.now();
       const result = await this.responseGenerator.generate({
         userMessage: request.message,
         context,
         tenantConfig,
         currentDateTime: new Date(),
-        availableCategories
+        availableCategories: [] // No longer needed - MCP handles validation
       });
+      timings.generateResponse = Date.now() - step3Start;
 
-      // Step 5: Store user message and bot response in history
-      await this.conversationClient.storeMessage(
-        request.userId,
-        request.threadId || request.messageId,
-        'user',
-        request.message
-      );
-
-      await this.conversationClient.storeMessage(
-        request.userId,
-        request.threadId || request.messageId,
-        'assistant',
-        result.responseText
-      );
-
-      // Step 6: Format response for Google Chat
+      // Step 4: Format response for Google Chat (do this first)
+      const step4Start = Date.now();
       const response = this.responseFormatter.formatResponse(
         result.responseText,
         result.chartUrl,
         result.chartTitle
       );
+      timings.formatResponse = Date.now() - step4Start;
 
-      // Log performance
-      const duration = Date.now() - startTime;
-      console.log('Response generated successfully', {
+      // Step 5: Store messages in history (DON'T WAIT - fire and forget)
+      Promise.all([
+        this.conversationClient.storeMessage(
+          request.userId,
+          request.threadId || request.messageId,
+          'user',
+          request.message
+        ),
+        this.conversationClient.storeMessage(
+          request.userId,
+          request.threadId || request.messageId,
+          'assistant',
+          result.responseText
+        )
+      ]).catch(error => {
+        console.error('Failed to store conversation history (non-blocking)', {
+          error: error.message,
+          userId: request.userId
+        });
+      });
+
+      // Log performance with detailed timings
+      const totalDuration = Date.now() - startTime;
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Response generated successfully',
         userId: request.userId,
         tenantId: tenantConfig.tenantId,
-        durationMs: duration,
+        totalDurationMs: totalDuration,
+        timings: {
+          resolveTenant: timings.resolveTenant,
+          getContext: timings.getContext,
+          generateResponse: timings.generateResponse,
+          formatResponse: timings.formatResponse
+        },
         toolCallsCount: result.toolCallsMade.length,
         chartGenerated: result.chartUrl !== null
-      });
+      }));
 
       return response;
     } catch (error: any) {

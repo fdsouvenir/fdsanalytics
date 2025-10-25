@@ -26,33 +26,52 @@ export class ChartTypeSelector {
     toolName: string,
     userMessage?: string
   ): Promise<ChartType> {
+    const startTime = Date.now();
+
     if (!data || data.length === 0) {
       return 'bar';  // Default fallback
     }
 
     // Analyze data structure
+    const analysisStart = Date.now();
     const analysis = this.analyzeData(data);
+    const analysisTime = Date.now() - analysisStart;
 
     // Use rule-based selection for simple cases (faster)
+    const ruleBasedStart = Date.now();
     const ruleBasedType = this.ruleBasedSelection(analysis);
+    const ruleBasedTime = Date.now() - ruleBasedStart;
+
     if (ruleBasedType && this.isHighConfidence(analysis, ruleBasedType)) {
       console.log(JSON.stringify({
-        severity: 'DEBUG',
+        severity: 'INFO',
         message: 'Chart type selected (rule-based)',
         chartType: ruleBasedType,
-        dataAnalysis: analysis
+        durationMs: Date.now() - startTime,
+        timings: {
+          analysis: analysisTime,
+          ruleBased: ruleBasedTime
+        }
       }));
       return ruleBasedType;
     }
 
     // Use Gemini for complex cases
     try {
+      const geminiStart = Date.now();
       const geminiType = await this.geminiBasedSelection(analysis, toolName, userMessage);
+      const geminiTime = Date.now() - geminiStart;
+
       console.log(JSON.stringify({
-        severity: 'DEBUG',
+        severity: 'INFO',
         message: 'Chart type selected (Gemini)',
         chartType: geminiType,
-        dataAnalysis: analysis
+        durationMs: Date.now() - startTime,
+        timings: {
+          analysis: analysisTime,
+          ruleBased: ruleBasedTime,
+          gemini: geminiTime
+        }
       }));
       return geminiType;
     } catch (error: any) {

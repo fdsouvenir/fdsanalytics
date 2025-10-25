@@ -3,8 +3,8 @@ import { GoogleGenerativeAI, GenerativeModel, FunctionDeclaration } from '@googl
 
 interface GeminiFunction {
   name: string;
-  description: string;
-  parameters: any;
+  description?: string;
+  parameters?: any;
 }
 
 interface GeminiMessage {
@@ -144,7 +144,10 @@ export class GeminiClient {
   /**
    * Generate response using chat session with system instructions and history
    */
-  async generateChatResponse(input: GenerateChatResponseInput): Promise<GenerateResponseOutput> {
+  async generateChatResponse(
+    input: GenerateChatResponseInput,
+    modelOverride?: string
+  ): Promise<GenerateResponseOutput> {
     await this.initialize();
 
     if (!this.genAI) {
@@ -152,6 +155,18 @@ export class GeminiClient {
     }
 
     try {
+      // Use override model if provided, otherwise use default
+      const modelToUse = modelOverride || this.modelName;
+
+      if (modelOverride) {
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Using model override for chat response',
+          defaultModel: this.modelName,
+          overrideModel: modelToUse
+        }));
+      }
+
       // Convert conversation history to Gemini format
       const history = this.convertToGeminiHistory(input.conversationHistory);
 
@@ -164,14 +179,29 @@ export class GeminiClient {
 
       // Create model with system instruction and tools
       const modelConfig: any = {
-        model: this.modelName,
+        model: modelToUse,
         systemInstruction: {
           parts: [{ text: input.systemInstruction }]
+        },
+        generationConfig: {
+          temperature: 1,
+          topP: 0.95,
+          // Disable thinking mode for faster responses
+          // This is critical for flash-lite performance
+          responseModalities: ['TEXT']
         }
       };
 
       if (functionDeclarations.length > 0) {
         modelConfig.tools = [{ functionDeclarations }];
+
+        // Force function calling mode for faster tool selection
+        // Mode 'ANY' eliminates "should I call a function?" decision step
+        modelConfig.tool_config = {
+          function_calling_config: {
+            mode: 'ANY'
+          }
+        };
       }
 
       const model = this.genAI.getGenerativeModel(modelConfig);
@@ -289,17 +319,33 @@ export class GeminiClient {
   async generateFinalResponse(
     originalPrompt: string,
     functionName: string,
-    functionResult: any
+    functionResult: any,
+    modelOverride?: string
   ): Promise<string> {
     await this.initialize();
 
-    if (!this.model) {
-      throw new Error('Gemini model not initialized');
+    if (!this.genAI) {
+      throw new Error('Gemini not initialized');
     }
 
     try {
+      // Use override model if provided, otherwise use default
+      const modelToUse = modelOverride || this.modelName;
+
+      if (modelOverride) {
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Using model override for final response',
+          defaultModel: this.modelName,
+          overrideModel: modelToUse
+        }));
+      }
+
+      // Get the appropriate model instance
+      const model = this.genAI.getGenerativeModel({ model: modelToUse });
+
       // Create chat with function result
-      const chat = this.model.startChat({
+      const chat = model.startChat({
         history: [
           {
             role: 'user',

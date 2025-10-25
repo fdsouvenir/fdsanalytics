@@ -5,6 +5,8 @@ import { ChartTypeSelector } from '../chart/ChartTypeSelector';
 import { ChartSpec, ChartType } from '../chart/chartTypes';
 import { TenantConfig } from '../config/tenantConfig';
 import { formatChartLabel } from '../utils/labelFormatter';
+import { INTENT_FUNCTIONS } from '../tools/intentFunctions';
+import { AnalyticsToolHandler } from '../tools/AnalyticsToolHandler';
 
 interface ConversationContext {
   relevantMessages: Array<{
@@ -54,6 +56,7 @@ interface ToolCall {
 export class ResponseGenerator {
   private chartBuilder: ChartBuilder;
   private chartTypeSelector: ChartTypeSelector;
+  private analyticsToolHandler: AnalyticsToolHandler;
 
   constructor(
     private mcpClient: MCPClient,
@@ -63,24 +66,26 @@ export class ResponseGenerator {
   ) {
     this.chartBuilder = new ChartBuilder();
     this.chartTypeSelector = new ChartTypeSelector(geminiClient);
+    this.analyticsToolHandler = new AnalyticsToolHandler();
   }
 
   /**
    * Generate response from user message
    */
   async generate(input: ResponseGeneratorInput): Promise<ResponseGeneratorOutput> {
+    const startTime = Date.now();
+    const timings: Record<string, number> = {};
     const toolCalls: ToolCall[] = [];
     let responseText = '';
     let chartUrl: string | null = null;
     let chartTitle: string | undefined;
 
     try {
-      // Step 1: Get MCP tool definitions
-      const availableTools = await this.getMCPToolDefinitions();
-
-      // Step 2: Build system instruction and conversation history
+      // Step 1: Build system instruction and conversation history
+      const step1Start = Date.now();
       const systemInstruction = this.buildSystemInstruction(input);
       const conversationHistory = this.buildConversationHistory(input.context);
+      timings.buildContext = Date.now() - step1Start;
 
       // DEBUG: Check conversation context and history
       console.log('DEBUG: Conversation context check:', JSON.stringify({
@@ -97,22 +102,31 @@ export class ResponseGenerator {
         systemInstructionLength: systemInstruction.length
       }, null, 2));
 
-      // Step 3: Ask Gemini which tool(s) to call using chat API
+      // Step 2: Ask Gemini which intent function to call
+      // Use gemini-2.5-flash-lite for ultra-fast tool selection (<1s vs 100s)
+      // CRITICAL: Empty history for speed - matches AI Studio test setup
+      const step2Start = Date.now();
       const geminiResponse = await this.geminiClient.generateChatResponse({
         userMessage: input.userMessage,
         systemInstruction: systemInstruction,
-        conversationHistory: conversationHistory,
-        availableFunctions: availableTools
-      });
+        conversationHistory: [],  // Empty history for fast tool selection
+        availableFunctions: INTENT_FUNCTIONS.map(fn => ({
+          name: fn.name,
+          description: fn.description,
+          parameters: fn.parameters
+        }))
+      }, 'gemini-2.5-flash-lite');  // Use flash-lite for maximum speed
+      timings.geminiToolSelection = Date.now() - step2Start;
 
-      // Step 4: Execute tool call if Gemini requested one
+      // Step 3: Execute intent function if Gemini requested one
       if (geminiResponse.functionCall) {
         const toolStartTime = Date.now();
-        const toolResult = await this.mcpClient.callTool(
+        const toolResult = await this.analyticsToolHandler.execute(
           geminiResponse.functionCall.name,
           geminiResponse.functionCall.args
         );
         const toolDuration = Date.now() - toolStartTime;
+        timings.intentFunctionExecution = toolDuration;
 
         toolCalls.push({
           toolName: geminiResponse.functionCall.name,
@@ -124,15 +138,19 @@ export class ResponseGenerator {
         // Validate query result
         const resultValidation = this.validateQueryResult(toolResult, geminiResponse.functionCall.args);
 
-        // Step 5: Send tool result back to Gemini for final response
+        // Step 4: Send tool result back to Gemini for final response
         if (resultValidation.isEmpty) {
           responseText = this.formatEmptyResultResponse(geminiResponse.functionCall.args);
+          timings.geminiFinalResponse = 0;
         } else {
+          const step4Start = Date.now();
           responseText = await this.geminiClient.generateFinalResponse(
             input.userMessage,
             geminiResponse.functionCall.name,
             toolResult
+            // Use default gemini-2.5-pro for high-quality final responses
           );
+          timings.geminiFinalResponse = Date.now() - step4Start;
 
           // Add result validation warnings
           if (resultValidation.warning) {
@@ -140,7 +158,7 @@ export class ResponseGenerator {
           }
         }
 
-        // Step 6: Generate chart if appropriate (don't chart empty results)
+        // Step 5: Generate chart if appropriate (don't chart empty results)
         const rowCount = toolResult?.rows?.length || 0;
         const shouldChart = this.enableCharts && !resultValidation.isEmpty && this.shouldGenerateChart(toolResult);
 
@@ -155,11 +173,13 @@ export class ResponseGenerator {
         }));
 
         if (shouldChart) {
+          const step5Start = Date.now();
           const chartSpec = await this.buildChartSpec(
             toolResult,
             geminiResponse.functionCall.name,
             input.userMessage
           );
+          timings.buildChartSpec = Date.now() - step5Start;
 
           console.log(JSON.stringify({
             severity: 'DEBUG',
@@ -169,8 +189,10 @@ export class ResponseGenerator {
           }));
 
           if (chartSpec) {
+            const chartUrlStart = Date.now();
             chartUrl = await this.chartBuilder.generateChartUrl(chartSpec);
             chartTitle = chartSpec.title;
+            timings.generateChartUrl = Date.now() - chartUrlStart;
 
             console.log(JSON.stringify({
               severity: 'INFO',
@@ -179,6 +201,9 @@ export class ResponseGenerator {
               title: chartTitle
             }));
           }
+        } else {
+          timings.buildChartSpec = 0;
+          timings.generateChartUrl = 0;
         }
       } else {
         // No function call - use Gemini's direct response
@@ -192,6 +217,29 @@ export class ResponseGenerator {
 
       responseText = this.formatErrorResponse(error);
     }
+
+    // Log detailed timing breakdown
+    const totalDuration = Date.now() - startTime;
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'ResponseGenerator.generate() completed',
+      totalDurationMs: totalDuration,
+      architecture: 'intent-based',
+      models: {
+        toolSelection: 'gemini-2.5-flash-lite',
+        finalResponse: 'gemini-2.5-pro'
+      },
+      timings: {
+        buildContext: timings.buildContext || 0,
+        geminiToolSelection: timings.geminiToolSelection || 0,
+        intentFunctionExecution: timings.intentFunctionExecution || 0,
+        geminiFinalResponse: timings.geminiFinalResponse || 0,
+        buildChartSpec: timings.buildChartSpec || 0,
+        generateChartUrl: timings.generateChartUrl || 0
+      },
+      toolCallsCount: toolCalls.length,
+      chartGenerated: chartUrl !== null
+    }));
 
     return {
       responseText,
@@ -220,41 +268,13 @@ export class ResponseGenerator {
 
   /**
    * Build system instruction for Gemini (persistent context)
+   * Minimal instruction - rely on tool schema and multi-turn chat for the rest
    */
   private buildSystemInstruction(input: ResponseGeneratorInput): string {
-    const parts: string[] = [];
-
-    // Business context
-    parts.push(`You are an analytics assistant for ${input.tenantConfig.businessName}.`);
-    parts.push(`Business timezone: ${input.tenantConfig.timezone}`);
-    parts.push(`Currency: ${input.tenantConfig.currency}`);
-    parts.push(`Current date and time: ${input.currentDateTime.toISOString()}`);
-
-    // Available categories
-    if (input.availableCategories && input.availableCategories.length > 0) {
-      parts.push(`\nAvailable product categories: ${input.availableCategories.join(', ')}`);
-    }
-
-    // Context retention instructions
-    parts.push(`\nContext Retention:`);
-    parts.push(`- Read conversation history to understand context`);
-    parts.push(`- If current message refers to previous timeframes, categories, or metrics, use that information`);
-    parts.push(`- If user says "totals" after asking about a timeframe, use that timeframe`);
-    parts.push(`- If user says "compare to X" after asking about Y, apply same parameters to both`);
-    parts.push(`- Only ask for clarification if context is truly missing or ambiguous`);
-
-    // Ordering and ranking instructions
-    parts.push(`\nExtracting Ordering and Ranking:`);
-    parts.push(`- "top N", "highest", "best", "most" → orderBy.direction="desc", limit=N`);
-    parts.push(`- "bottom N", "lowest", "least", "worst" → orderBy.direction="asc", limit=N`);
-    parts.push(`- "day with highest/lowest" → groupBy=["date"], orderBy accordingly, limit=1`);
-    parts.push(`- orderBy.field should typically be "metric_value"`);
-    parts.push(`- Examples:`);
-    parts.push(`  * "Top 5 items" → orderBy: {field: "metric_value", direction: "desc"}, limit: 5, groupBy: ["item"]`);
-    parts.push(`  * "Highest sales day" → orderBy: {field: "metric_value", direction: "desc"}, limit: 1, groupBy: ["date"]`);
-    parts.push(`  * "Show by category" → groupBy: ["category"], orderBy: {field: "metric_value", direction: "desc"}`);
-
-    return parts.join('\n');
+    return `You are an analytics assistant for ${input.tenantConfig.businessName}.
+Business timezone: ${input.tenantConfig.timezone}
+Currency: ${input.tenantConfig.currency}
+Current date and time: ${input.currentDateTime.toISOString()}`;
   }
 
   /**
@@ -293,6 +313,16 @@ export class ResponseGenerator {
         ...msg,
         content: msg.content.substring(0, MAX_TOKENS * 2)  // Rough char limit
       }));
+    }
+
+    // Ensure first message is from user (Gemini API requirement)
+    while (messages.length > 0 && messages[0].role !== 'user') {
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Skipping assistant message at start of conversation history',
+        skippedRole: messages[0].role
+      }));
+      messages = messages.slice(1);  // Skip assistant messages at start
     }
 
     // Convert to Gemini format
