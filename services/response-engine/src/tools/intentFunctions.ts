@@ -170,5 +170,35 @@ export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
       },
       required: ['itemName', 'startDate', 'endDate']
     }
+  },
+  {
+    name: 'compare_periods',
+    description: 'Compare sales between two separate time periods (months, weeks, or custom date ranges). Use for queries like "compare May and June", "May vs June", "this month vs last month", "Q1 vs Q2", "week 1 vs week 2"',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        startDate1: {
+          type: SchemaType.STRING,
+          description: 'Start date of first period in YYYY-MM-DD format'
+        },
+        endDate1: {
+          type: SchemaType.STRING,
+          description: 'End date of first period in YYYY-MM-DD format'
+        },
+        startDate2: {
+          type: SchemaType.STRING,
+          description: 'Start date of second period in YYYY-MM-DD format'
+        },
+        endDate2: {
+          type: SchemaType.STRING,
+          description: 'End date of second period in YYYY-MM-DD format'
+        },
+        category: {
+          type: SchemaType.STRING,
+          description: 'Optional category filter like "(Sushi)" for primary category or "Signature Rolls" for subcategory'
+        }
+      },
+      required: ['startDate1', 'endDate1', 'startDate2', 'endDate2']
+    }
   }
 ];

@@ -58,6 +58,9 @@ export class AnalyticsToolHandler {
         case 'track_item_performance':
           result = await this.trackItemPerformance(args as any);
           break;
+        case 'compare_periods':
+          result = await this.comparePeriods(args as any);
+          break;
         default:
           throw new Error(`Unknown function: ${functionName}`);
       }
@@ -371,6 +374,35 @@ export class AnalyticsToolHandler {
       max_rows: 100,
       order_by_field: 'date',
       order_direction: 'ASC'
+    });
+  }
+
+  /**
+   * Compare two time periods
+   */
+  private async comparePeriods(args: {
+    startDate1: string;
+    endDate1: string;
+    startDate2: string;
+    endDate2: string;
+    category?: string;
+  }): Promise<ToolResult> {
+    const { primaryCategory, subcategory } = this.parseCategory(args.category);
+
+    return this.callStoredProcedure('query_metrics', {
+      metric_name: 'net_sales',
+      start_date: args.startDate1,
+      end_date: args.endDate1,
+      primary_category: primaryCategory,
+      subcategory: subcategory,
+      item_name: null,
+      aggregation: 'SUM',
+      group_by_fields: null,
+      baseline_start_date: args.startDate2,
+      baseline_end_date: args.endDate2,
+      max_rows: 1,
+      order_by_field: 'metric_value',
+      order_direction: 'DESC'
     });
   }
 
