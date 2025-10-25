@@ -56,3 +56,8 @@ gcp-key*.json
 secrets.yml
 credentials.json
 GEMINI_API_KEY
+/test-results/
+
+# Local development files
+*.local
+Dockerfile.local
