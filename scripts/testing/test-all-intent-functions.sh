@@ -145,7 +145,7 @@ send_query() {
         "text": "$query",
         "argumentText": "$query",
         "thread": {
-          "name": "spaces/test-space/threads/test-thread-1"
+          "name": "spaces/test-space/threads/test-thread-${test_id}"
         }
       },
       "space": {
@@ -191,23 +191,68 @@ EOF
     if [ -s "$RUN_DIR/test-${test_id}-${function_name}.json" ]; then
         local text_length=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.textLength // 0')
         local used_fallback=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.usedFallback // false')
+        local response_preview=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.responsePreview // ""')
+
+        # Display response preview if available
+        if [ -n "$response_preview" ] && [ "$response_preview" != "null" ]; then
+            echo -e "${CYAN}Response: \"${response_preview}...\"${NC}"
+            # Save to file for reference
+            echo "$response_preview" > "$RUN_DIR/test-${test_id}-${function_name}-response.txt"
+        fi
 
         if [ "$text_length" -gt 0 ]; then
-            echo -e "${GREEN}✓ SUCCESS${NC} (textLength: $text_length)"
-            SUCCESSFUL_TESTS=$((SUCCESSFUL_TESTS + 1))
+            # Validate response quality with Claude CLI (if response preview available)
+            local is_valid="true"
+            local validation_reason=""
 
-            if [ "$used_fallback" = "true" ]; then
-                echo -e "${BLUE}  ℹ Fallback pattern used${NC}"
-                FALLBACK_USED=$((FALLBACK_USED + 1))
+            if [ -n "$response_preview" ] && [ "$response_preview" != "null" ]; then
+                local validation=$("$SCRIPT_DIR/lib/validate-response.sh" "$query" "$response_preview" 2>/dev/null)
+
+                if [ -n "$validation" ]; then
+                    is_valid=$(echo "$validation" | jq -r '.valid // true' 2>/dev/null)
+                    validation_reason=$(echo "$validation" | jq -r '.reason // ""' 2>/dev/null)
+                fi
             fi
 
-            # Update function stats
-            if [ -z "${FUNCTION_STATS[$function_name]}" ]; then
-                FUNCTION_STATS[$function_name]="1:0"
+            if [ "$is_valid" = "true" ]; then
+                echo -e "${GREEN}✓ SUCCESS${NC} (textLength: $text_length)"
+
+                if [ -n "$validation_reason" ]; then
+                    echo -e "${BLUE}  ✓ Validated: $validation_reason${NC}"
+                fi
+
+                SUCCESSFUL_TESTS=$((SUCCESSFUL_TESTS + 1))
+
+                if [ "$used_fallback" = "true" ]; then
+                    echo -e "${BLUE}  ℹ Fallback pattern used${NC}"
+                    FALLBACK_USED=$((FALLBACK_USED + 1))
+                fi
+
+                # Update function stats
+                if [ -z "${FUNCTION_STATS[$function_name]}" ]; then
+                    FUNCTION_STATS[$function_name]="1:0"
+                else
+                    local success=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f1)
+                    local fail=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f2)
+                    FUNCTION_STATS[$function_name]="$((success + 1)):$fail"
+                fi
             else
-                local success=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f1)
-                local fail=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f2)
-                FUNCTION_STATS[$function_name]="$((success + 1)):$fail"
+                echo -e "${RED}✗ FAILED${NC} (invalid response)"
+
+                if [ -n "$validation_reason" ]; then
+                    echo -e "${RED}  Reason: $validation_reason${NC}"
+                fi
+
+                FAILED_TESTS=$((FAILED_TESTS + 1))
+
+                # Update function stats
+                if [ -z "${FUNCTION_STATS[$function_name]}" ]; then
+                    FUNCTION_STATS[$function_name]="0:1"
+                else
+                    local success=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f1)
+                    local fail=$(echo "${FUNCTION_STATS[$function_name]}" | cut -d: -f2)
+                    FUNCTION_STATS[$function_name]="$success:$((fail + 1))"
+                fi
             fi
         else
             echo -e "${RED}✗ FAILED${NC} (empty response)"

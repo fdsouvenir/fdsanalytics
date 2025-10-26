@@ -1,0 +1,9 @@
+{
+  "name": "fdsanalytics-testing",
+  "version": "1.0.0",
+  "description": "Testing scripts for FDS Analytics",
+  "private": true,
+  "dependencies": {
+    "@google-cloud/firestore": "^7.1.0"
+  }
+}

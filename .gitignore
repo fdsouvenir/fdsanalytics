@@ -61,3 +61,5 @@ GEMINI_API_KEY
 # Local development files
 *.local
 Dockerfile.local
+scripts/testing/node_modules/
+.env.local

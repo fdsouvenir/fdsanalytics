@@ -698,7 +698,8 @@ export class GeminiClient {
             severity: responseText.length === 0 ? 'WARNING' : 'INFO',
             message: 'Final text response received',
             rounds: roundCount,
-            textLength: responseText.length
+            textLength: responseText.length,
+            responsePreview: responseText.substring(0, 200) // First 200 chars for debugging
           };
 
           // WORKAROUND: If empty response but we have function result, retry with explicit prompt
@@ -783,6 +784,7 @@ export class GeminiClient {
               logData.textLength = responseText.length;
               logData.severity = responseText.length > 0 ? 'INFO' : 'WARNING';
               logData.usedFallback = true;
+              logData.responsePreview = responseText.substring(0, 200); // First 200 chars
             } catch (fallbackError: any) {
               console.log(JSON.stringify({
                 severity: 'ERROR',
