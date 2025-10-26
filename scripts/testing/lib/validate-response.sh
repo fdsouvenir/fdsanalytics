@@ -14,8 +14,8 @@ if [ -z "$QUERY" ] || [ -z "$RESPONSE" ]; then
     exit 1
 fi
 
-# Call Claude CLI for validation
-VALIDATION=$(cat <<PROMPT | claude --print --model claude-3-5-haiku-20241022 2>&1
+# Call Claude CLI for validation (uses 'haiku' alias for latest Haiku model)
+VALIDATION=$(cat <<PROMPT | claude --print --model haiku 2>&1
 Validate this chatbot response. Return ONLY valid JSON, no explanation.
 
 User Query: "$QUERY"
