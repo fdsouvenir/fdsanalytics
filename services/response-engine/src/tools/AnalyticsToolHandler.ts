@@ -2,7 +2,7 @@
 // Executes intent-based functions by calling BigQuery stored procedures directly
 
 import { BigQuery } from '@google-cloud/bigquery';
-import { UserInputError, UserInputErrorCodes, TransientError, TransientErrorCodes } from '@fdsanalytics/shared/errors';
+import { UserInputError, UserInputErrorCodes, TransientError, TransientErrorCodes } from '@fdsanalytics/shared';
 
 export interface ToolResult {
   rows: any[];

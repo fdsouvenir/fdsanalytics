@@ -2,7 +2,7 @@
 // Optimized for fast Gemini function calling (<1s vs 100s)
 // Each function represents a specific user intent with minimal parameters
 
-import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
+import { FunctionDeclaration, SchemaType } from '@google-cloud/vertexai';
 
 export const INTENT_FUNCTIONS: FunctionDeclaration[] = [
   {

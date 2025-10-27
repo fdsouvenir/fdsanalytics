@@ -53,7 +53,7 @@ echo -e "${GREEN}Image built and pushed successfully${NC}"
 
 # Get Response Engine and Conversation Manager URLs
 echo -e "${GREEN}Getting service URLs...${NC}"
-=$(gcloud run services describe response-engine \
+RESPONSE_ENGINE_URL=$(gcloud run services describe response-engine \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "")
@@ -63,10 +63,10 @@ CONVERSATION_MANAGER_URL=$(gcloud run services describe conversation-manager \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "")
 
-if [ -z "${}" ] || [ -z "${CONVERSATION_MANAGER_URL}" ]; then
+if [ -z "${RESPONSE_ENGINE_URL}" ] || [ -z "${CONVERSATION_MANAGER_URL}" ]; then
   echo -e "${YELLOW}Warning: Dependency services not found. Make sure to deploy them first.${NC}"
   echo -e "${YELLOW}Using placeholder URLs for now.${NC}"
-  ="https://response-engine-placeholder"
+  RESPONSE_ENGINE_URL="https://response-engine-placeholder"
   CONVERSATION_MANAGER_URL="https://conversation-manager-placeholder"
 fi
 
@@ -80,12 +80,12 @@ gcloud run deploy "${SERVICE_NAME}" \
   --memory=512Mi \
   --cpu=1 \
   --timeout=60s \
-  --min-instances=0 \
+  --min-instances=1 \
   --max-instances=10 \
   --concurrency=10 \
   --ingress=all \
   --allow-unauthenticated \
-  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,=${},CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
+  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,GEMINI_SECRET_NAME=GEMINI_API_KEY,DEFAULT_TIMEZONE=America/Chicago,BQ_DATASET_ANALYTICS=restaurant_analytics,BQ_DATASET_INSIGHTS=insights,BQ_DATASET_CHAT_HISTORY=chat_history,CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
   --project="${PROJECT_ID}" || {
   echo -e "${RED}Deployment failed${NC}"

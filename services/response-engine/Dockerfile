@@ -4,17 +4,34 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy shared package first (dependency)
+COPY shared/package*.json ./shared/
+COPY shared/tsconfig.json ./shared/
+COPY shared/index.ts ./shared/
+COPY shared/types ./shared/types
+COPY shared/utils ./shared/utils
+COPY shared/errors ./shared/errors
+COPY shared/constants ./shared/constants
+
+# Copy response-engine package files
 COPY services/response-engine/package*.json ./
 COPY services/response-engine/tsconfig.json ./
 
 # Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY services/response-engine/src ./src
+# Build shared package first
+WORKDIR /app/shared
+RUN npm ci
+RUN npm run build
 
-# Build TypeScript
+# Link shared package to response-engine node_modules
+WORKDIR /app
+RUN mkdir -p node_modules/@fdsanalytics && \
+    ln -s /app/shared node_modules/@fdsanalytics/shared
+
+# Build response-engine
+COPY services/response-engine/src ./src
 RUN npm run build
 
 # Production image
@@ -25,6 +42,13 @@ WORKDIR /app
 # Copy package files and install production dependencies
 COPY services/response-engine/package*.json ./
 RUN npm ci --only=production
+
+# Copy compiled shared package from builder
+COPY --from=builder /app/shared /app/shared
+
+# Link shared package
+RUN mkdir -p node_modules/@fdsanalytics && \
+    ln -s /app/shared node_modules/@fdsanalytics/shared
 
 # Copy compiled code from builder
 COPY --from=builder /app/dist ./dist

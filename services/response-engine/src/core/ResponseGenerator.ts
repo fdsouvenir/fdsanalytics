@@ -108,7 +108,7 @@ export class ResponseGenerator {
       const chatResult = await this.geminiClient.generateWithFunctionCalling({
         userMessage: input.userMessage,
         systemInstruction: systemInstruction,
-        conversationHistory: [],  // Empty history for speed
+        conversationHistory: conversationHistory,  // Use actual conversation history
         availableFunctions: INTENT_FUNCTIONS.map(fn => ({
           name: fn.name,
           description: fn.description,

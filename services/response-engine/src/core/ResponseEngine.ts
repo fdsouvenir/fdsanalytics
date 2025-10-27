@@ -76,17 +76,23 @@ export class ResponseEngine {
         };
       }
 
-      // Step 2: SKIP conversation context (optimization)
-      // We don't use conversation history for tool selection (pass empty array)
-      // This saves 4-6 seconds and avoids unnecessary Gemini summarization call
-      // TODO: Re-enable if we want to use context for final response generation
-      timings.getContext = 0;
-      const context = { relevantMessages: [] }; // Empty context
+      // Step 2: Get conversation context
+      // Fetch recent conversation history to enable follow-up questions
+      // and maintain context across messages
+      const step2Start = Date.now();
+      const context = await this.conversationClient.getContext(
+        request.userId,
+        request.threadId || request.messageId,
+        request.message,  // Current message for context
+        10  // Max 10 most recent messages
+      );
+      timings.getContext = Date.now() - step2Start;
 
       console.log(JSON.stringify({
         severity: 'DEBUG',
-        message: 'Skipping conversation context for performance',
-        reason: 'Tool selection uses empty history'
+        message: 'Fetched conversation context',
+        messageCount: context.relevantMessages?.length || 0,
+        durationMs: timings.getContext
       }));
 
       // Step 3: Generate response

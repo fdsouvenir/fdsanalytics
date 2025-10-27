@@ -1,5 +1,4 @@
-import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
-import { GoogleGenerativeAI, GenerativeModel, FunctionDeclaration } from '@google/generative-ai';
+import { VertexAI, GenerativeModel, FunctionDeclaration } from '@google-cloud/vertexai';
 
 interface GeminiFunction {
   name: string;
@@ -37,105 +36,80 @@ interface GenerateChatResponseInput {
 }
 
 /**
- * GeminiClient - Interface to Google Gemini Pro API
+ * GeminiClient - Interface to Vertex AI Gemini API
  *
  * Handles:
- * - Loading API key from Secret Manager
- * - Generating responses with Gemini 2.5 Pro
+ * - Connecting to Vertex AI in us-central1 region (co-located with Cloud Run & BigQuery)
+ * - Generating responses with Gemini models
  * - Function calling for analytics tool execution
  * - Retry with backoff on rate limits
+ *
+ * REGIONAL OPTIMIZATION:
+ * Uses Vertex AI with explicit location=us-central1 to ensure all API calls
+ * stay in the same region as Cloud Run and BigQuery, eliminating cross-region latency.
  */
 export class GeminiClient {
-  private genAI: GoogleGenerativeAI | null = null;
+  private vertexAI: VertexAI;
   private model: GenerativeModel | null = null;
-  private apiKey: string | null = null;
+  private readonly location = 'us-central1';  // Co-located with Cloud Run & BigQuery
 
   constructor(
     private projectId: string,
-    private geminiSecretName: string,
+    private geminiSecretName: string,  // Kept for backwards compatibility but not used
     private modelName: string = 'gemini-2.5-pro'
-  ) {}
+  ) {
+    // Initialize Vertex AI with regional endpoint
+    this.vertexAI = new VertexAI({
+      project: this.projectId,
+      location: this.location
+    });
+
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      message: 'VertexAI client initialized',
+      project: this.projectId,
+      location: this.location,
+      defaultModel: this.modelName
+    }));
+  }
 
   /**
-   * Initialize the Gemini client by loading API key
+   * Initialize the Gemini client
+   * With Vertex AI, this uses Application Default Credentials (no API key needed)
    */
   async initialize(): Promise<void> {
-    if (this.genAI) {
+    if (this.model) {
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'GeminiClient already initialized, skipping'
       }));
-      return; // Already initialized
+      return;
     }
 
     console.log(JSON.stringify({
       severity: 'INFO',
-      message: 'GeminiClient not initialized, loading from Secret Manager'
+      message: 'Initializing Vertex AI Gemini model',
+      model: this.modelName,
+      location: this.location
     }));
 
     try {
-      const loadStart = Date.now();
-      this.apiKey = await this.loadApiKey();
-      const loadDuration = Date.now() - loadStart;
-
-      console.log(JSON.stringify({
-        severity: 'INFO',
-        message: 'API key loaded from Secret Manager',
-        durationMs: loadDuration
-      }));
-
-      this.genAI = new GoogleGenerativeAI(this.apiKey);
-      this.model = this.genAI.getGenerativeModel({ model: this.modelName });
-
-      console.log(JSON.stringify({
-        severity: 'INFO',
-        message: 'GeminiClient initialization complete'
-      }));
-    } catch (error: any) {
-      console.error('Failed to initialize GeminiClient', { error: error.message });
-      throw new Error('Failed to initialize Gemini API');
-    }
-  }
-
-  /**
-   * Load Gemini API key from environment variable or Secret Manager
-   * Prioritizes environment variable for faster startup (0ms vs 50s)
-   */
-  private async loadApiKey(): Promise<string> {
-    // Check for environment variable first (fast path)
-    const envApiKey = process.env.GEMINI_API_KEY;
-    if (envApiKey) {
-      console.log(JSON.stringify({
-        severity: 'INFO',
-        message: 'API key loaded from environment variable'
-      }));
-      return envApiKey;
-    }
-
-    // Fall back to Secret Manager (slow path - 50s)
-    console.log(JSON.stringify({
-      severity: 'INFO',
-      message: 'No GEMINI_API_KEY env var, falling back to Secret Manager'
-    }));
-
-    try {
-      const client = new SecretManagerServiceClient();
-      const secretPath = `projects/${this.projectId}/secrets/${this.geminiSecretName}/versions/latest`;
-
-      const [version] = await client.accessSecretVersion({ name: secretPath });
-      const apiKey = version.payload?.data?.toString();
-
-      if (!apiKey) {
-        throw new Error('API key is empty');
-      }
-
-      return apiKey;
-    } catch (error: any) {
-      console.error('Failed to load Gemini API key from Secret Manager', {
-        error: error.message,
-        secretName: this.geminiSecretName
+      this.model = this.vertexAI.getGenerativeModel({
+        model: this.modelName
       });
-      throw error;
+
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Vertex AI Gemini model initialized',
+        authentication: 'Application Default Credentials',
+        location: this.location
+      }));
+    } catch (error: any) {
+      console.error('Failed to initialize Vertex AI Gemini', {
+        error: error.message,
+        location: this.location
+      });
+      throw new Error('Failed to initialize Vertex AI Gemini');
     }
   }
 
@@ -164,11 +138,11 @@ export class GeminiClient {
       // Regular generation without functions
       const result = await this.model.generateContent(prompt);
       const response = result.response;
-      const text = response.text?.() || '';
+      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
       return { text };
     } catch (error: any) {
-      console.error('Gemini API error', { error: error.message });
+      console.error('Vertex AI Gemini API error', { error: error.message });
 
       // Check for rate limit
       if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
@@ -177,7 +151,7 @@ export class GeminiClient {
         return await this.generateResponse(input); // Retry once
       }
 
-      throw new Error(`Gemini API error: ${error.message}`);
+      throw new Error(`Vertex AI Gemini API error: ${error.message}`);
     }
   }
 
@@ -194,13 +168,10 @@ export class GeminiClient {
 
     console.log(JSON.stringify({
       severity: 'DEBUG',
-      message: 'Gemini initialization completed',
-      durationMs: initDuration
+      message: 'Vertex AI initialization completed',
+      durationMs: initDuration,
+      location: this.location
     }));
-
-    if (!this.genAI) {
-      throw new Error('Gemini not initialized');
-    }
 
     try {
       // Use override model if provided, otherwise use default
@@ -259,27 +230,28 @@ export class GeminiClient {
       }));
 
       const modelStart = Date.now();
-      const model = this.genAI.getGenerativeModel(modelConfig);
+      const model = this.vertexAI.getGenerativeModel(modelConfig);
       const modelDuration = Date.now() - modelStart;
 
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Generative model created',
-        durationMs: modelDuration
+        durationMs: modelDuration,
+        location: this.location
       }));
 
       let result;
 
       // Optimization: Use direct generateContent() when history is empty (faster)
-      // This matches AI Studio behavior and eliminates chat session overhead
       const apiCallStart = Date.now();
       console.log(JSON.stringify({
         severity: 'DEBUG',
-        message: 'Starting Gemini API call',
+        message: 'Starting Vertex AI API call',
         model: modelToUse,
         hasHistory: history.length > 0,
         functionCount: functionDeclarations.length,
-        messageLength: input.userMessage.length
+        messageLength: input.userMessage.length,
+        location: this.location
       }));
 
       if (history.length === 0) {
@@ -297,10 +269,11 @@ export class GeminiClient {
       const apiCallDuration = Date.now() - apiCallStart;
       console.log(JSON.stringify({
         severity: 'INFO',
-        message: 'Gemini API call completed',
+        message: 'Vertex AI API call completed',
         model: modelToUse,
         durationMs: apiCallDuration,
-        hasHistory: history.length > 0
+        hasHistory: history.length > 0,
+        location: this.location
       }));
 
       const parseStart = Date.now();
@@ -336,20 +309,19 @@ export class GeminiClient {
         durationMs: parseDuration
       }));
 
-      return {
-        text: response.text?.() || ''
-      };
+      const text = candidates[0]?.content?.parts?.[0]?.text || '';
+      return { text };
     } catch (error: any) {
-      console.error('Gemini chat API error', { error: error.message });
+      console.error('Vertex AI chat API error', { error: error.message });
 
       // Handle rate limits
       if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
         console.warn('Gemini rate limit hit, waiting and retrying...');
         await this.sleep(10000);
-        return await this.generateChatResponse(input); // Retry once
+        return await this.generateChatResponse(input, modelOverride); // Retry once
       }
 
-      throw new Error(`Gemini chat API error: ${error.message}`);
+      throw new Error(`Vertex AI chat API error: ${error.message}`);
     }
   }
 
@@ -376,10 +348,6 @@ export class GeminiClient {
     prompt: string,
     functions: GeminiFunction[]
   ): Promise<GenerateResponseOutput> {
-    if (!this.genAI) {
-      throw new Error('Gemini not initialized');
-    }
-
     // Convert to Gemini function declarations
     const functionDeclarations: FunctionDeclaration[] = functions.map(fn => ({
       name: fn.name,
@@ -388,7 +356,7 @@ export class GeminiClient {
     }));
 
     // Create model with functions
-    const model = this.genAI.getGenerativeModel({
+    const model = this.vertexAI.getGenerativeModel({
       model: this.modelName,
       tools: [{ functionDeclarations }]
     });
@@ -413,9 +381,8 @@ export class GeminiClient {
     }
 
     // No function call, return text
-    return {
-      text: response.text?.() || ''
-    };
+    const text = candidates[0]?.content?.parts?.[0]?.text || '';
+    return { text };
   }
 
   /**
@@ -429,10 +396,6 @@ export class GeminiClient {
     modelOverride?: string
   ): Promise<string> {
     await this.initialize();
-
-    if (!this.genAI) {
-      throw new Error('Gemini not initialized');
-    }
 
     try {
       // Use override model if provided, otherwise use default
@@ -448,7 +411,7 @@ export class GeminiClient {
       }
 
       // Get the appropriate model instance
-      const model = this.genAI.getGenerativeModel({ model: modelToUse });
+      const model = this.vertexAI.getGenerativeModel({ model: modelToUse });
 
       // Create chat with function result
       const chat = model.startChat({
@@ -479,10 +442,11 @@ export class GeminiClient {
       });
 
       const result = await chat.sendMessage('');
-      return result.response.text();
+      const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return text;
     } catch (error: any) {
       console.error('Failed to generate final response', { error: error.message });
-      throw new Error('Failed to generate final response from Gemini');
+      throw new Error('Failed to generate final response from Vertex AI Gemini');
     }
   }
 
@@ -507,12 +471,9 @@ export class GeminiClient {
     console.log(JSON.stringify({
       severity: 'DEBUG',
       message: 'Starting continuous chat session',
-      durationMs: initDuration
+      durationMs: initDuration,
+      location: this.location
     }));
-
-    if (!this.genAI) {
-      throw new Error('Gemini not initialized');
-    }
 
     try {
       // Use override model if provided, otherwise use default
@@ -566,7 +527,7 @@ export class GeminiClient {
 
       // Start chat session with AUTO mode (no toolConfig = Gemini decides)
       const modelStart = Date.now();
-      const model = this.genAI.getGenerativeModel(modelConfig);
+      const model = this.vertexAI.getGenerativeModel(modelConfig);
       const chat = model.startChat({
         history: history
       });
@@ -575,7 +536,8 @@ export class GeminiClient {
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Chat session started with AUTO mode',
-        durationMs: modelDuration
+        durationMs: modelDuration,
+        location: this.location
       }));
 
       // Step 1: Send user message (Gemini will decide whether to call function or generate text)
@@ -583,7 +545,8 @@ export class GeminiClient {
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Sending initial message (AUTO mode - Gemini chooses function or text)',
-        messageLength: input.userMessage.length
+        messageLength: input.userMessage.length,
+        location: this.location
       }));
 
       const result1 = await chat.sendMessage(input.userMessage);
@@ -593,7 +556,8 @@ export class GeminiClient {
         severity: 'INFO',
         message: 'Initial response received',
         model: modelToUse,
-        durationMs: apiCall1Duration
+        durationMs: apiCall1Duration,
+        location: this.location
       }));
 
       // Check for function call
@@ -602,9 +566,8 @@ export class GeminiClient {
 
       if (candidates.length === 0 || !candidates[0].content?.parts) {
         // No function call, return text response
-        return {
-          responseText: response1.text() || 'I\'m not sure how to help with that.'
-        };
+        const text = candidates[0]?.content?.parts?.[0]?.text || 'I\'m not sure how to help with that.';
+        return { responseText: text };
       }
 
       let functionCall: { name: string; args: Record<string, any> } | undefined;
@@ -621,9 +584,8 @@ export class GeminiClient {
 
       if (!functionCall) {
         // No function call, return text
-        return {
-          responseText: response1.text() || 'I\'m not sure how to help with that.'
-        };
+        const text = candidates[0]?.content?.parts?.[0]?.text || 'I\'m not sure how to help with that.';
+        return { responseText: text };
       }
 
       console.log(JSON.stringify({
@@ -651,7 +613,6 @@ export class GeminiClient {
       }));
 
       // Step 3: Send function result back to chat and handle multiple function call rounds
-      // Gemini may call the function multiple times before generating text (like in AI Studio)
       let currentResult = await chat.sendMessage([{
         functionResponse: {
           name: functionCall.name,
@@ -659,7 +620,6 @@ export class GeminiClient {
         }
       }]);
 
-      // Log the response after sending function result
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Received response after sending functionResponse',
@@ -691,9 +651,9 @@ export class GeminiClient {
 
         if (!nextFunctionCall) {
           // No more function calls, we got text!
-          let responseText = response.text() || '';
+          let responseText = candidates[0]?.content?.parts?.[0]?.text || '';
 
-          // Log response details (especially for debugging empty responses)
+          // Log response details
           const logData: any = {
             severity: responseText.length === 0 ? 'WARNING' : 'INFO',
             message: 'Final text response received',
@@ -704,25 +664,6 @@ export class GeminiClient {
 
           // WORKAROUND: If empty response but we have function result, retry with explicit prompt
           if (responseText.length === 0 && functionResult) {
-            const candidate = candidates[0];
-            logData.debugInfo = {
-              candidatesCount: candidates.length,
-              finishReason: candidate?.finishReason,
-              safetyRatings: candidate?.safetyRatings,
-              hasContent: !!candidate?.content,
-              hasParts: !!candidate?.content?.parts,
-              partsCount: candidate?.content?.parts?.length || 0,
-              contentParts: candidate?.content?.parts?.map((p: any) => ({
-                hasText: 'text' in p,
-                textValue: p.text || null,
-                hasFunctionCall: 'functionCall' in p,
-                hasFunctionResponse: 'functionResponse' in p,
-                keys: Object.keys(p)
-              })),
-              promptFeedback: (response as any).promptFeedback,
-              rawCandidate: JSON.stringify(candidate)
-            };
-
             console.log(JSON.stringify({
               ...logData,
               message: 'Empty response detected, falling back to new chat session with fake history'
@@ -730,8 +671,7 @@ export class GeminiClient {
 
             try {
               // FALLBACK: Create a NEW chat session with functionResponse in history
-              // This mimics the old "fake history" pattern that always worked
-              const fallbackModel = this.genAI.getGenerativeModel({
+              const fallbackModel = this.vertexAI.getGenerativeModel({
                 model: modelToUse,
                 systemInstruction: input.systemInstruction,
                 generationConfig: {
@@ -771,7 +711,7 @@ export class GeminiClient {
               const fallbackResult = await fallbackChat.sendMessage(
                 'Please provide a natural language response based on this data.'
               );
-              responseText = fallbackResult.response.text() || '';
+              responseText = fallbackResult.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
               console.log(JSON.stringify({
                 severity: responseText.length > 0 ? 'INFO' : 'WARNING',
@@ -779,12 +719,6 @@ export class GeminiClient {
                 fallbackTextLength: responseText.length,
                 fallbackSuccessful: responseText.length > 0
               }));
-
-              // Update logData with fallback result
-              logData.textLength = responseText.length;
-              logData.severity = responseText.length > 0 ? 'INFO' : 'WARNING';
-              logData.usedFallback = true;
-              logData.responsePreview = responseText.substring(0, 200); // First 200 chars
             } catch (fallbackError: any) {
               console.log(JSON.stringify({
                 severity: 'ERROR',
@@ -792,19 +726,6 @@ export class GeminiClient {
                 error: fallbackError.message
               }));
             }
-          } else if (responseText.length === 0) {
-            // No function result to work with, just log debug info
-            const candidate = candidates[0];
-            logData.debugInfo = {
-              candidatesCount: candidates.length,
-              finishReason: candidate?.finishReason,
-              safetyRatings: candidate?.safetyRatings,
-              hasContent: !!candidate?.content,
-              hasParts: !!candidate?.content?.parts,
-              partsCount: candidate?.content?.parts?.length || 0,
-              promptFeedback: (response as any).promptFeedback,
-              rawCandidate: JSON.stringify(candidate)
-            };
           }
 
           console.log(JSON.stringify(logData));
@@ -836,9 +757,7 @@ export class GeminiClient {
           message: 'Additional function executed',
           functionName: nextFunctionCall.name,
           durationMs: nextToolDuration,
-          resultSize: nextResultSize,
-          resultType: typeof nextFunctionResult,
-          resultKeys: typeof nextFunctionResult === 'object' && nextFunctionResult ? Object.keys(nextFunctionResult) : []
+          resultSize: nextResultSize
         }));
 
         // Send the next function result
@@ -861,7 +780,7 @@ export class GeminiClient {
         toolExecutionMs
       };
     } catch (error: any) {
-      console.error('Continuous chat API error', { error: error.message });
+      console.error('Vertex AI continuous chat error', { error: error.message });
 
       // Check for rate limit
       if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
@@ -870,7 +789,7 @@ export class GeminiClient {
         return await this.generateWithFunctionCalling(input, executeFunction, modelOverride);
       }
 
-      throw new Error(`Gemini continuous chat error: ${error.message}`);
+      throw new Error(`Vertex AI continuous chat error: ${error.message}`);
     }
   }
 
