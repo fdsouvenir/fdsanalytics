@@ -2,6 +2,7 @@
 // Executes intent-based functions by calling BigQuery stored procedures directly
 
 import { BigQuery } from '@google-cloud/bigquery';
+import { UserInputError, UserInputErrorCodes, TransientError, TransientErrorCodes } from '@fdsanalytics/shared/errors';
 
 export interface ToolResult {
   rows: any[];
@@ -62,7 +63,12 @@ export class AnalyticsToolHandler {
           result = await this.comparePeriods(args as any);
           break;
         default:
-          throw new Error(`Unknown function: ${functionName}`);
+          throw new UserInputError(
+            `Unknown function: ${functionName}`,
+            UserInputErrorCodes.MISSING_REQUIRED_PARAM,
+            { functionName },
+            ['Available functions: show_daily_sales, show_top_items, show_category_breakdown, get_total_sales, find_peak_day, compare_day_types, track_item_performance, compare_periods']
+          );
       }
 
       console.log(JSON.stringify({
@@ -75,6 +81,11 @@ export class AnalyticsToolHandler {
 
       return result;
     } catch (error: any) {
+      // Re-throw if already a typed error
+      if (error instanceof UserInputError || error instanceof TransientError) {
+        throw error;
+      }
+
       console.error(`Error executing ${functionName}:`, error);
       throw error;
     }
@@ -152,6 +163,25 @@ export class AnalyticsToolHandler {
     endDate: string;
     category?: string;
   }): Promise<ToolResult> {
+    // Validate limit parameter
+    if (!Number.isInteger(args.limit) || args.limit < 1) {
+      throw new UserInputError(
+        'Limit must be a positive integer (minimum 1)',
+        UserInputErrorCodes.PARAM_OUT_OF_RANGE,
+        { limit: args.limit },
+        ['Try a value between 1 and 100', 'Example: limit=10 for top 10 items']
+      );
+    }
+
+    if (args.limit > 1000) {
+      throw new UserInputError(
+        'Limit is too large (maximum 1000)',
+        UserInputErrorCodes.PARAM_OUT_OF_RANGE,
+        { limit: args.limit },
+        ['Try a smaller value (e.g., 100)', 'Large limits may cause slow performance']
+      );
+    }
+
     const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
     // HYBRID CACHE: Check if date range is covered in insights
@@ -580,8 +610,59 @@ export class AnalyticsToolHandler {
         executionTimeMs: Date.now() - startTime
       };
     } catch (error: any) {
+      const errorMessage = error.message || '';
+
+      // Detect timeout errors
+      if (errorMessage.includes('timeout') || errorMessage.includes('deadline exceeded')) {
+        throw new TransientError(
+          'Query took too long to execute. Try narrowing your date range or filters.',
+          TransientErrorCodes.NETWORK_TIMEOUT,
+          {
+            procedureName,
+            params,
+            executionTimeMs: Date.now() - startTime
+          },
+          5000 // Suggest retrying after 5 seconds
+        );
+      }
+
+      // Detect not found errors (invalid category, etc.)
+      if (errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+        throw new UserInputError(
+          'The requested data was not found. Please check your filters.',
+          UserInputErrorCodes.INVALID_CATEGORY,
+          {
+            procedureName,
+            params
+          },
+          ['Check category spelling (e.g., "(Beer)", "(Sushi)")', 'Try broadening your date range', 'Verify item names are correct']
+        );
+      }
+
+      // Detect rate limit errors
+      if (errorMessage.includes('quota') || errorMessage.includes('rate limit')) {
+        throw new TransientError(
+          'BigQuery rate limit exceeded. Please try again in a moment.',
+          TransientErrorCodes.RATE_LIMIT_EXCEEDED,
+          {
+            procedureName,
+            executionTimeMs: Date.now() - startTime
+          },
+          10000 // Suggest retrying after 10 seconds
+        );
+      }
+
+      // Generic BigQuery error
       console.error('BigQuery error:', error);
-      throw new Error(`BigQuery error: ${error.message}`);
+      throw new TransientError(
+        'Database query failed. Please try again.',
+        TransientErrorCodes.SERVICE_UNAVAILABLE,
+        {
+          procedureName,
+          errorMessage: error.message,
+          executionTimeMs: Date.now() - startTime
+        }
+      );
     }
   }
 }

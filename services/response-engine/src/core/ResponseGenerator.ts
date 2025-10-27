@@ -3,7 +3,7 @@ import { ChartBuilder } from '../chart/ChartBuilder';
 import { ChartTypeSelector } from '../chart/ChartTypeSelector';
 import { ChartSpec, ChartType } from '../chart/chartTypes';
 import { TenantConfig } from '../config/tenantConfig';
-import { formatChartLabel } from '../utils/labelFormatter';
+import { formatChartLabel } from '@fdsanalytics/shared';
 import { INTENT_FUNCTIONS } from '../tools/intentFunctions';
 import { AnalyticsToolHandler } from '../tools/AnalyticsToolHandler';
 

@@ -3,7 +3,7 @@
  */
 
 import { GeminiClient, SummarizationInput } from '../gemini/GeminiClient';
-import { ConversationMessage } from '../storage/BigQueryStorage';
+import { ConversationMessage } from '../storage/FirestoreStorage';
 
 export interface ConversationContext {
   relevantMessages: Array<{

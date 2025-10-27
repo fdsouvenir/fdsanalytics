@@ -19,11 +19,19 @@ const config = loadConfig();
 // V1: Hardcoded single tenant (per PROJECT_INFO.md)
 const TENANT_ID = 'senso-sushi';
 
-// V1: Hardcoded OAuth tokens (TODO: Load from tenant config in v2)
-const OAUTH_TOKENS: OAuthTokens = {
-  access_token: process.env.GMAIL_ACCESS_TOKEN || '',
-  refresh_token: process.env.GMAIL_REFRESH_TOKEN || '',
-};
+// V1: Load OAuth tokens from Secret Manager (mounted as env var at deployment)
+// Secret contains JSON: {"access_token": "...", "refresh_token": "..."}
+const OAUTH_TOKENS: OAuthTokens = (() => {
+  const credentials = process.env.GMAIL_OAUTH_CREDENTIALS;
+  if (!credentials) {
+    throw new Error('GMAIL_OAUTH_CREDENTIALS environment variable not set');
+  }
+  try {
+    return JSON.parse(credentials);
+  } catch (error) {
+    throw new Error('Invalid GMAIL_OAUTH_CREDENTIALS JSON format');
+  }
+})();
 
 /**
  * Main Cloud Function entry point

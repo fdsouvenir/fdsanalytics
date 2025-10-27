@@ -64,7 +64,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --min-instances=0 \
   --max-instances=10 \
   --concurrency=10 \
-  --ingress=all \
+  --ingress=internal \
   --no-allow-unauthenticated \
   --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info" \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
