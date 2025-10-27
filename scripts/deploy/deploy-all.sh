@@ -36,10 +36,9 @@ echo -e "${YELLOW}Region: ${REGION}${NC}"
 echo ""
 echo -e "${YELLOW}This will deploy services in the following order:${NC}"
 echo "  1. BigQuery Stored Procedures"
-echo "  2. MCP Server"
-echo "  3. Conversation Manager"
-echo "  4. Response Engine"
-echo "  5. Gmail Ingestion"
+echo "  2. Conversation Manager"
+echo "  3. Response Engine"
+echo "  4. Gmail Ingestion"
 echo ""
 echo -e "${YELLOW}Continue? (y/n)${NC}"
 read -r RESPONSE
@@ -73,13 +72,7 @@ deploy_service() {
 # 1. Deploy BigQuery stored procedures
 deploy_service "BigQuery Stored Procedures" "deploy-stored-procedures.sh" || true
 
-# 2. Deploy MCP Server (no dependencies)
-deploy_service "MCP Server" "deploy-mcp-server.sh" || {
-  echo -e "${RED}Critical: MCP Server failed to deploy${NC}"
-  echo -e "${YELLOW}Continuing with other services...${NC}"
-}
-
-# 3. Deploy Conversation Manager (no dependencies)
+# 2. Deploy Conversation Manager (no dependencies)
 deploy_service "Conversation Manager" "deploy-conversation-manager.sh" || {
   echo -e "${RED}Critical: Conversation Manager failed to deploy${NC}"
   echo -e "${YELLOW}Continuing with other services...${NC}"
@@ -87,14 +80,6 @@ deploy_service "Conversation Manager" "deploy-conversation-manager.sh" || {
 
 # Grant service-to-service IAM permissions
 echo -e "${BLUE}==== Granting Service-to-Service Permissions ====${NC}"
-echo -e "${GREEN}Allowing Response Engine to invoke MCP Server...${NC}"
-gcloud run services add-iam-policy-binding mcp-server \
-  --region="${REGION}" \
-  --member="serviceAccount:response-engine@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/run.invoker" \
-  --project="${PROJECT_ID}" \
-  --quiet 2>/dev/null || echo -e "${YELLOW}Warning: Failed to grant MCP Server invoker role${NC}"
-
 echo -e "${GREEN}Allowing Response Engine to invoke Conversation Manager...${NC}"
 gcloud run services add-iam-policy-binding conversation-manager \
   --region="${REGION}" \
@@ -104,12 +89,12 @@ gcloud run services add-iam-policy-binding conversation-manager \
   --quiet 2>/dev/null || echo -e "${YELLOW}Warning: Failed to grant Conversation Manager invoker role${NC}"
 echo ""
 
-# 4. Deploy Response Engine (depends on MCP + Conversation Manager)
+# 3. Deploy Response Engine (depends on Conversation Manager)
 deploy_service "Response Engine" "deploy-response-engine.sh" || {
   echo -e "${RED}Critical: Response Engine failed to deploy${NC}"
 }
 
-# 5. Deploy Gmail Ingestion (independent)
+# 4. Deploy Gmail Ingestion (independent)
 deploy_service "Gmail Ingestion" "deploy-gmail-ingestion.sh" || {
   echo -e "${YELLOW}Warning: Gmail Ingestion failed to deploy${NC}"
 }
@@ -147,12 +132,6 @@ RESPONSE_ENGINE_URL=$(gcloud run services describe response-engine \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "Not deployed")
 echo -e "${GREEN}Response Engine: ${RESPONSE_ENGINE_URL}${NC}"
-
-MCP_SERVER_URL=$(gcloud run services describe mcp-server \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --format='value(status.url)' 2>/dev/null || echo "Not deployed")
-echo -e "${GREEN}MCP Server (internal): ${MCP_SERVER_URL}${NC}"
 
 CONVERSATION_MANAGER_URL=$(gcloud run services describe conversation-manager \
   --region="${REGION}" \

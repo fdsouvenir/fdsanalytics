@@ -42,7 +42,7 @@ interface GenerateChatResponseInput {
  * Handles:
  * - Loading API key from Secret Manager
  * - Generating responses with Gemini 2.5 Pro
- * - Function calling for MCP tool orchestration
+ * - Function calling for analytics tool execution
  * - Retry with backoff on rate limits
  */
 export class GeminiClient {

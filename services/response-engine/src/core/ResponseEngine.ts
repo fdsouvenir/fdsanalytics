@@ -1,4 +1,3 @@
-import { MCPClient } from '../clients/MCPClient';
 import { ConversationClient } from '../clients/ConversationClient';
 import { GeminiClient } from '../clients/GeminiClient';
 import { TenantResolver } from './TenantResolver';
@@ -32,7 +31,7 @@ export interface ChatMessageResponse {
  * Coordinates all services:
  * - Tenant resolution
  * - Conversation context
- * - Response generation (Gemini + MCP)
+ * - Response generation (Gemini with function calling)
  * - Chart generation
  * - Response formatting
  */
@@ -43,13 +42,11 @@ export class ResponseEngine {
 
   constructor(
     private config: Config,
-    private mcpClient: MCPClient,
     private conversationClient: ConversationClient,
     private geminiClient: GeminiClient
   ) {
     this.tenantResolver = new TenantResolver();
     this.responseGenerator = new ResponseGenerator(
-      mcpClient,
       geminiClient,
       config.enableCharts,
       config.maxChartDatapoints
@@ -99,7 +96,7 @@ export class ResponseEngine {
         context,
         tenantConfig,
         currentDateTime: new Date(),
-        availableCategories: [] // No longer needed - MCP handles validation
+        availableCategories: []
       });
       timings.generateResponse = Date.now() - step3Start;
 
@@ -168,35 +165,4 @@ export class ResponseEngine {
     }
   }
 
-  /**
-   * Get available categories from MCP
-   * Uses a simple query to get distinct categories
-   */
-  private async getAvailableCategories(): Promise<string[]> {
-    try {
-      // Query for distinct categories (last 30 days)
-      const result = await this.mcpClient.callTool('query_analytics', {
-        metric: 'net_sales',
-        timeframe: {
-          type: 'relative',
-          relative: 'last_month'
-        },
-        aggregation: 'sum',
-        groupBy: ['category'],
-        limit: 100
-      });
-
-      if (result.rows && Array.isArray(result.rows)) {
-        return result.rows.map((row: any) => row.primary_category || row.category).filter(Boolean);
-      }
-
-      return [];
-    } catch (error: any) {
-      console.warn('Failed to get available categories', {
-        error: error.message
-      });
-      // Return empty array on failure (non-critical)
-      return [];
-    }
-  }
 }

@@ -21,7 +21,7 @@ if [ $# -lt 1 ]; then
   echo ""
   echo "Available services:"
   echo "  - response-engine"
-  echo "  - mcp-server"
+  echo "  - response-engine"
   echo "  - conversation-manager"
   echo "  - gmail-ingestion"
   echo ""
@@ -47,7 +47,7 @@ case "${SERVICE_NAME}" in
       --project="${PROJECT_ID}" \
       --limit="${LIMIT}"
     ;;
-  response-engine|mcp-server|conversation-manager)
+  response-engine|response-engine|conversation-manager)
     echo -e "${GREEN}Fetching Cloud Run logs...${NC}"
     gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE_NAME}" \
       --project="${PROJECT_ID}" \

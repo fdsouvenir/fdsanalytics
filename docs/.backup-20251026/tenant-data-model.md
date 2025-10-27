@@ -48,14 +48,14 @@ flowchart TD
         
         RE --> RG[Response Generator<br/>Gemini 2.5 Pro<br/>Orchestrate query + response]
         
-        RG -->|Direct BigQuery| BQHandler[Intent BigQuery analytics<br/>query_analytics tool]
-        BQHandler -->|structured params<br/>metric, timeframe, filters<br/>aggregation, groupBy| BQSales
-        BQHandler -->|query labor data| BQLabor
-        BQHandler -->|query unified data| BQUnified
+        RG -->|MCP protocol| MCP[Intent BigQuery analytics<br/>query_analytics tool]
+        MCP -->|structured params<br/>metric, timeframe, filters<br/>aggregation, groupBy| BQSales
+        MCP -->|query labor data| BQLabor
+        MCP -->|query unified data| BQUnified
         
         BQSales --> SP[Stored Procedures<br/>- Validate params<br/>- Check enums vs data<br/>- Build query safely<br/>- Execute]
-        SP -->|data| BQHandler
-        BQHandler -->|data| RG
+        SP -->|data| MCP
+        MCP -->|data| RG
         
         RG -->|chart specs| CB[Chart Builder<br/>quickchart.io]
         CB -->|chart URLs| RG
@@ -66,7 +66,7 @@ flowchart TD
     
     subgraph "Future: BQML"
         BQUnified -.-> BQML[BQML Models<br/>- Forecasts<br/>- Anomaly detection<br/>- Demand prediction]
-        BQML -.->|separate BigQuery functions| BQHandler
+        BQML -.->|separate MCP tools| MCP
     end
     
     style RE fill:#e1f5ff
@@ -74,7 +74,7 @@ flowchart TD
     style BQSales fill:#f0f0f0
     style BQLabor fill:#f0f0f0
     style BQUnified fill:#e8f5e9
-    style BQHandler fill:#e8f5e9
+    style MCP fill:#e8f5e9
     style GmailIngest fill:#fff3e0
 ```
 
@@ -307,7 +307,7 @@ When building single-tenant version:
 - Always pass `workspaceId` and `userId` through the stack
 - Use `resolveTenant()` abstraction (even if hardcoded)
 - Store config as object, not scattered variables
-- Design BigQuery analytics to accept dataset parameter
+- Design MCP server to accept dataset parameter
 - Keep tenant concepts in code comments
 
 This ensures smooth migration when multi-tenant is needed.

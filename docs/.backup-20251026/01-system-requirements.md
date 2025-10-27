@@ -12,7 +12,7 @@
 
 Build a conversational analytics assistant that allows restaurant managers to query sales data via Google Chat. The system ingests daily PMIX reports from Gmail, stores data in BigQuery, and uses Gemini AI to provide natural language responses with charts.
 
-**Key Innovation:** Secure-by-design query architecture using BigQuery analyticss and BigQuery stored procedures to prevent SQL injection.
+**Key Innovation:** Secure-by-design query architecture using MCP servers and BigQuery stored procedures to prevent SQL injection.
 
 ---
 
@@ -81,7 +81,7 @@ Users can ask about:
 
 ### 3.2 Security
 - **Zero SQL injection risk** via:
-  - Direct BigQuery validation
+  - MCP protocol validation
   - BigQuery stored procedures with parameterization
   - Enum validation against actual data
 - Gmail OAuth with **minimal scopes** (readonly)
@@ -97,7 +97,7 @@ Users can ask about:
 ### 3.4 Scalability (Design for Future)
 - Architecture supports **multi-tenant** without refactor
 - BQ dataset per tenant (data isolation)
-- BigQuery analyticss stateless (horizontal scaling)
+- MCP servers stateless (horizontal scaling)
 - Conversation history bounded (last 10 messages)
 
 ### 3.5 Maintainability

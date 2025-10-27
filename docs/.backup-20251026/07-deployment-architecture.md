@@ -26,7 +26,7 @@
                     ┌──────────────────┼──────────────────┐
                     │                  │                  │
             ┌───────▼────────┐  ┌──────▼──────┐  ┌──────▼──────┐
-            │ Conversation    │  │    BQHandler      │  │   Chart     │
+            │ Conversation    │  │    MCP      │  │   Chart     │
             │   Manager       │  │   Server    │  │  Builder    │
             │ (Cloud Run)     │  │ (Cloud Run) │  │  (Library)  │
             │ 256MB / 0.5 CPU │  │ 256MB / 0.5 │  └─────────────┘

@@ -16,7 +16,7 @@ PROJECT_ID="${PROJECT_ID:-fdsanalytics}"
 # Service accounts to create
 declare -A SERVICE_ACCOUNTS=(
   ["response-engine"]="Response Engine Service Account"
-  ["mcp-server"]="MCP Server Service Account"
+  ["response-engine"]="Response Engine Service Account"
   ["conversation-manager"]="Conversation Manager Service Account"
   ["gmail-ingestion"]="Gmail Ingestion Service Account"
 )

@@ -227,7 +227,7 @@ interface ToolCall {
 
 interface ResponseGenerator {
   /**
-   * Generate response using Gemini 2.5 Pro + BigQuery functions.
+   * Generate response using Gemini 2.5 Pro + MCP tools.
    */
   generate(
     input: ResponseGeneratorInput
@@ -239,10 +239,10 @@ interface ResponseGenerator {
 
 ## 5. BigQuery analytics Interface
 
-### 5.1 BQHandler Protocol (Standard)
+### 5.1 MCP Protocol (Standard)
 
 ```typescript
-interface BigQueryRequest {
+interface MCPRequest {
   method: 'tools/list' | 'tools/call';
   params?: {
     name?: string;            // Tool name (for tools/call)
@@ -250,7 +250,7 @@ interface BigQueryRequest {
   };
 }
 
-interface BigQueryResponse {
+interface MCPResponse {
   result?: any;
   error?: {
     code: number;

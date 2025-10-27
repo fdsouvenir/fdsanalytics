@@ -4,7 +4,6 @@ export interface Config {
   environment: string;
   logLevel: string;
   geminiSecretName: string;
-  mcpServerUrl: string;
   conversationManagerUrl: string;
   port: number;
   enableCharts: boolean;
@@ -25,7 +24,6 @@ export function loadConfig(): Config {
     environment: process.env.ENVIRONMENT || 'development',
     logLevel: process.env.LOG_LEVEL || 'info',
     geminiSecretName: process.env.GEMINI_SECRET_NAME || 'GEMINI_API_KEY',
-    mcpServerUrl: process.env.MCP_SERVER_URL || 'http://localhost:3001',
     conversationManagerUrl: process.env.CONVERSATION_MANAGER_URL || 'http://localhost:3002',
     port: parseInt(process.env.PORT || '8080', 10),
     enableCharts: process.env.ENABLE_CHARTS !== 'false',

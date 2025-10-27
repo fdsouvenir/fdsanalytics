@@ -58,25 +58,25 @@
 
 describe('ResponseGenerator', () => {
   let generator: ResponseGenerator;
-  let mockAnalyticsHandler: jest.Mocked<AnalyticsToolHandler>;
+  let mockMcpClient: jest.Mocked<MCPClient>;
   let mockChartBuilder: jest.Mocked<ChartBuilder>;
   
   beforeEach(() => {
     // Setup mocks
-    mockAnalyticsHandler = {
+    mockMcpClient = {
       callTool: jest.fn()
     };
     mockChartBuilder = {
       generate: jest.fn()
     };
     
-    generator = new ResponseGenerator(mockAnalyticsHandler, mockChartBuilder);
+    generator = new ResponseGenerator(mockMcpClient, mockChartBuilder);
   });
   
   describe('generate()', () => {
     it('should generate response for simple sales query', async () => {
       // Arrange
-      mockAnalyticsHandler.callTool.mockResolvedValue({
+      mockMcpClient.callTool.mockResolvedValue({
         rows: [{ total: 5234 }],
         totalRows: 1
       });
@@ -94,7 +94,7 @@ describe('ResponseGenerator', () => {
       
       // Assert
       expect(result.responseText).toContain('$5,234');
-      expect(mockAnalyticsHandler.callTool).toHaveBeenCalledWith('query_analytics', {
+      expect(mockMcpClient.callTool).toHaveBeenCalledWith('query_analytics', {
         metric: 'net_sales',
         timeframe: { type: 'relative', relative: 'today' },
         aggregation: 'sum'
@@ -102,7 +102,7 @@ describe('ResponseGenerator', () => {
     });
     
     it('should handle invalid category gracefully', async () => {
-      mockAnalyticsHandler.callTool.mockRejectedValue(
+      mockMcpClient.callTool.mockRejectedValue(
         new Error('INVALID_CATEGORY: (Beers) not found')
       );
       
@@ -116,7 +116,7 @@ describe('ResponseGenerator', () => {
     });
     
     it('should include chart when data is suitable', async () => {
-      mockAnalyticsHandler.callTool.mockResolvedValue({
+      mockMcpClient.callTool.mockResolvedValue({
         rows: [
           { category: '(Beer)', total: 1000 },
           { category: '(Sushi)', total: 2000 }
@@ -187,7 +187,7 @@ describe('ResponseGenerator', () => {
 
 describe('Query Flow Integration', () => {
   let responseEngine: ResponseEngine;
-  let analyticsHandler: AnalyticsToolHandler;
+  let mcpServer: MCPServer;
   let testBigQuery: BigQuery;
   
   beforeAll(async () => {
@@ -195,8 +195,8 @@ describe('Query Flow Integration', () => {
     testBigQuery = new BigQuery({ projectId: 'fdsanalytics-test' });
     await setupTestData(testBigQuery);
     
-    analyticsHandler = new AnalyticsToolHandler(testBigQuery);
-    responseEngine = new ResponseEngine(analyticsHandler, ...);
+    mcpServer = new MCPServer(testBigQuery);
+    responseEngine = new ResponseEngine(mcpServer, ...);
   });
   
   it('should execute end-to-end sales query', async () => {
@@ -213,8 +213,8 @@ describe('Query Flow Integration', () => {
   });
   
   it('should handle stored procedure execution', async () => {
-    // Test that BigQuery analytics correctly calls BQ stored procedures
-    const result = await analyticsHandler.callTool('query_analytics', {
+    // Test that MCP server correctly calls BQ stored procedures
+    const result = await mcpServer.callTool('query_analytics', {
       metric: 'net_sales',
       timeframe: { type: 'relative', relative: 'today' },
       filters: { primaryCategory: '(Beer)' },

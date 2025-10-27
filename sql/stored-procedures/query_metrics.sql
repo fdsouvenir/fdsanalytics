@@ -80,22 +80,22 @@ BEGIN
   -- Build SELECT fields based on grouping
   IF group_by_fields IS NOT NULL AND group_by_fields != '' THEN
     IF STRPOS(group_by_fields, 'date') > 0 THEN
-      SET select_fields = select_fields || 'r.report_date, ';
+      SET select_fields = select_fields || 'r.report_date AS date, ';
       SET group_by_clause = group_by_clause || 'r.report_date, ';
     END IF;
 
     IF STRPOS(group_by_fields, 'category') > 0 THEN
-      SET select_fields = select_fields || 'm.primary_category, ';
+      SET select_fields = select_fields || 'm.primary_category AS category, ';
       SET group_by_clause = group_by_clause || 'm.primary_category, ';
     END IF;
 
     IF STRPOS(group_by_fields, 'subcategory') > 0 THEN
-      SET select_fields = select_fields || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.category") as subcategory, ';
+      SET select_fields = select_fields || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.category") AS subcategory, ';
       SET group_by_clause = group_by_clause || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.category"), ';
     END IF;
 
     IF STRPOS(group_by_fields, 'item') > 0 THEN
-      SET select_fields = select_fields || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.item_name") as item_name, ';
+      SET select_fields = select_fields || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.item_name") AS item, ';
       SET group_by_clause = group_by_clause || 'JSON_EXTRACT_SCALAR(m.dimensions, "$.item_name"), ';
     END IF;
   END IF;

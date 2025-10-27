@@ -2,42 +2,6 @@
  * Mock responses for testing
  */
 
-export const mockMCPToolsList = [
-  {
-    name: 'query_analytics',
-    description: 'Query sales and quantity data with flexible filtering',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        metric: { type: 'string', enum: ['net_sales', 'quantity_sold'] },
-        timeframe: { type: 'object' },
-        aggregation: { type: 'string' }
-      },
-      required: ['metric', 'timeframe', 'aggregation']
-    }
-  },
-  {
-    name: 'get_forecast',
-    description: 'Get sales forecast for next 7 days',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        days: { type: 'integer', default: 7 }
-      }
-    }
-  },
-  {
-    name: 'get_anomalies',
-    description: 'Get detected anomalies in sales',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        days: { type: 'integer', default: 7 }
-      }
-    }
-  }
-];
-
 export const mockQueryAnalyticsResult = {
   rows: [
     { primary_category: '(Beer)', total: 5234.50 },

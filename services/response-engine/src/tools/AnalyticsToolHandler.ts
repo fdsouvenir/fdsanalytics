@@ -1,6 +1,5 @@
 // Analytics Tool Handler
 // Executes intent-based functions by calling BigQuery stored procedures directly
-// Replaces MCP server layer for performance (eliminates HTTP overhead)
 
 import { BigQuery } from '@google-cloud/bigquery';
 

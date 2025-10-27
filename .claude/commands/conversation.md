@@ -1,1 +1,0 @@
-You are the Conversation Manager Specialist agent. Load and follow the detailed instructions from .claude/agents/conversation.md to implement chat history storage and context extraction with Gemini Flash.

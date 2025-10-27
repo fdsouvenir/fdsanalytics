@@ -64,11 +64,11 @@ grant_project_role "response-engine" "roles/logging.logWriter"
 grant_secret_access "response-engine" "GEMINI_API_KEY"
 echo ""
 
-# MCP Server Permissions
-echo -e "${BLUE}--- MCP Server ---${NC}"
-grant_project_role "mcp-server" "roles/bigquery.jobUser"
-grant_project_role "mcp-server" "roles/bigquery.dataViewer"
-grant_project_role "mcp-server" "roles/logging.logWriter"
+# Response Engine Permissions
+echo -e "${BLUE}--- Response Engine ---${NC}"
+grant_project_role "response-engine" "roles/bigquery.jobUser"
+grant_project_role "response-engine" "roles/bigquery.dataViewer"
+grant_project_role "response-engine" "roles/logging.logWriter"
 echo ""
 
 # Conversation Manager Permissions
@@ -95,8 +95,8 @@ echo ""
 
 echo -e "${GREEN}To grant service-to-service invoker permissions, run:${NC}"
 echo ""
-echo "# Allow Response Engine to invoke MCP Server"
-echo "gcloud run services add-iam-policy-binding mcp-server \\"
+echo "# Allow Response Engine to invoke Response Engine"
+echo "gcloud run services add-iam-policy-binding response-engine \\"
 echo "  --region ${REGION} \\"
 echo "  --member='serviceAccount:response-engine@${PROJECT_ID}.iam.gserviceaccount.com' \\"
 echo "  --role='roles/run.invoker' \\"

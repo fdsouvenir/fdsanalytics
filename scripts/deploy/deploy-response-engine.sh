@@ -51,9 +51,9 @@ docker buildx build --platform linux/amd64 -t "${IMAGE}" --push -f services/${SE
 
 echo -e "${GREEN}Image built and pushed successfully${NC}"
 
-# Get MCP Server and Conversation Manager URLs
+# Get Response Engine and Conversation Manager URLs
 echo -e "${GREEN}Getting service URLs...${NC}"
-MCP_SERVER_URL=$(gcloud run services describe mcp-server \
+=$(gcloud run services describe response-engine \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "")
@@ -63,10 +63,10 @@ CONVERSATION_MANAGER_URL=$(gcloud run services describe conversation-manager \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "")
 
-if [ -z "${MCP_SERVER_URL}" ] || [ -z "${CONVERSATION_MANAGER_URL}" ]; then
+if [ -z "${}" ] || [ -z "${CONVERSATION_MANAGER_URL}" ]; then
   echo -e "${YELLOW}Warning: Dependency services not found. Make sure to deploy them first.${NC}"
   echo -e "${YELLOW}Using placeholder URLs for now.${NC}"
-  MCP_SERVER_URL="https://mcp-server-placeholder"
+  ="https://response-engine-placeholder"
   CONVERSATION_MANAGER_URL="https://conversation-manager-placeholder"
 fi
 
@@ -85,7 +85,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --concurrency=10 \
   --ingress=all \
   --allow-unauthenticated \
-  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,MCP_SERVER_URL=${MCP_SERVER_URL},CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
+  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,=${},CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
   --project="${PROJECT_ID}" || {
   echo -e "${RED}Deployment failed${NC}"

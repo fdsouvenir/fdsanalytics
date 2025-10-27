@@ -51,23 +51,6 @@ export interface StatusResponse {
   message: string;
 }
 
-// MCP Server Interface
-export interface MCPRequest {
-  method: 'tools/list' | 'tools/call';
-  params?: {
-    name?: string;
-    arguments?: Record<string, any>;
-  };
-}
-
-export interface MCPResponse {
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-  };
-}
-
 export interface QueryAnalyticsParams {
   metric: 'net_sales' | 'quantity_sold';
   timeframe: {

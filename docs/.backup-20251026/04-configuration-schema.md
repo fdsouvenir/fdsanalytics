@@ -470,7 +470,7 @@ gcloud functions deploy gmail-ingestion \
 
 
 ```yaml
-# response-engine.yaml
+# mcp-service.yaml
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:

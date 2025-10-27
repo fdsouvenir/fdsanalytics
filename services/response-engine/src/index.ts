@@ -15,7 +15,6 @@ async function main() {
       environment: config.environment,
       projectId: config.projectId,
       port: config.port,
-      mcpServerUrl: config.mcpServerUrl,
       conversationManagerUrl: config.conversationManagerUrl
     });
 

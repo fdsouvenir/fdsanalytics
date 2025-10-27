@@ -26,7 +26,7 @@ This directory contains complete specifications for rebuilding the restaurant an
 - Single-tenant v1 with multi-tenant design considerations
 - Natural language analytics via Google Chat
 - PMIX ingestion from Gmail
-- Secure-by-design with BigQuery stored procedures
+- Secure-by-design with MCP + BQ stored procedures
 - Target: <5s query response, 80%+ test coverage
 
 ---
@@ -35,7 +35,7 @@ This directory contains complete specifications for rebuilding the restaurant an
 **Purpose:** Define all component interfaces  
 **Contains:**
 - Response Engine public API
-- BigQuery analytics protocol
+- MCP server protocol
 - BigQuery stored procedure signatures
 - Chart Builder interface
 - Error response standards
@@ -203,9 +203,9 @@ This directory contains complete specifications for rebuilding the restaurant an
 
 ## 🎯 Key Design Decisions
 
-### 1. Security: BigQuery Stored Procedures
+### 1. Security: MCP + Stored Procedures
 **Problem:** Prevent SQL injection  
-**Solution:** Direct BigQuery validates parameters → BigQuery stored procedures build queries safely  
+**Solution:** MCP protocol validates parameters → BigQuery stored procedures build queries safely  
 **Benefit:** Injection-proof by design
 
 ### 2. Architecture: Separation of Concerns

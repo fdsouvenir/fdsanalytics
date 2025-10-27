@@ -10,19 +10,19 @@ A microservices-based system that provides natural language analytics for restau
 - **Customer:** Senso Sushi (Frankfort) - Single tenant in V1
 - **Platform:** Google Cloud Platform (project: `fdsanalytics`)
 - **Region:** `us-central1`
-- **Status:** V1.0 - Production-ready with multi-tenant design considerations
+- **Status:** V1.0 - Production-ready with 93.3% test success rate
 
 ## Architecture
 
 ### Microservices Architecture
 
 ```
-Google Chat → Response Engine → MCP Server → BigQuery
-                     ↓              ↓
-              Conversation    Stored Procedures
-                Manager           (Security)
-                     ↓
-                BigQuery
+Google Chat → Response Engine → BigQuery Stored Procedures
+                     ↓                    ↓
+              Conversation            (Security Layer)
+                Manager                   ↓
+                     ↓               restaurant_analytics
+                BigQuery                insights
                (chat_history)
 
 Gmail API → Gmail Ingestion → BigQuery
@@ -30,12 +30,11 @@ Gmail API → Gmail Ingestion → BigQuery
 ```
 
 **Services:**
-1. **Response Engine** (Cloud Run) - Orchestrates MCP, Conversation Manager, and Gemini Pro
-2. **MCP Server** (Cloud Run) - Secure data access layer using Model Context Protocol
-3. **Conversation Manager** (Cloud Run) - Context extraction and message history
-4. **Gmail Ingestion** (Cloud Function) - PMIX PDF parsing from Gmail
+1. **Response Engine** (Cloud Run) - Orchestrates Gemini Pro with function calling for analytics queries
+2. **Conversation Manager** (Cloud Run) - Context extraction and message history
+3. **Gmail Ingestion** (Cloud Function) - PMIX PDF parsing from Gmail
 
-**Security Design:** MCP protocol validates parameters → BigQuery stored procedures prevent SQL injection
+**Security Design:** Gemini function calls → AnalyticsToolHandler validates parameters → BigQuery stored procedures prevent SQL injection
 
 ## Common Development Commands
 
@@ -62,30 +61,22 @@ npm run lint
 ### Testing
 
 ```bash
-# Run all tests
-npm test
+# Run full automated test suite (30 tests, 8 intent functions)
+./scripts/testing/test-all-intent-functions.sh
 
-# Unit tests only
-npm run test:unit
+# Test specific function
+./scripts/testing/test-all-intent-functions.sh --function compare_periods
 
-# Integration tests only (requires GCP authentication)
-npm run test:integration
-
-# E2E tests (requires deployed services)
-npm run test:e2e
-
-# Test with coverage report
-npm run test:coverage
-
-# Watch mode for development
-cd services/response-engine && npm run test:watch
+# Test results location
+ls test-results/run-*/
 ```
 
-**Test Structure:**
-- 70% unit tests (fast, mocked)
-- 25% integration tests (real BigQuery test dataset)
-- 5% E2E tests (critical user flows)
-- Target: 80%+ coverage overall, 90%+ for business logic
+**Test Infrastructure:**
+- Automated test harness validates all 8 intent functions
+- Claude AI-powered response validation (uses user's subscription via CLI)
+- 93.3% success rate (28/30 passing)
+- Response preview logging for debugging
+- Test data: 3-4 queries per function covering edge cases
 
 ### Deployment
 
@@ -100,7 +91,6 @@ gcloud config set project fdsanalytics
 
 # Deploy individual services
 ./scripts/deploy/deploy-response-engine.sh
-./scripts/deploy/deploy-mcp-server.sh
 ./scripts/deploy/deploy-conversation-manager.sh
 ./scripts/deploy/deploy-gmail-ingestion.sh
 
@@ -116,16 +106,16 @@ gcloud run services logs read response-engine --region us-central1 --limit 50
 
 ## Critical Design Patterns
 
-### 1. MCP Protocol for Security
+### 1. BigQuery Stored Procedures for Security
 
-**NEVER write raw SQL queries.** Always use MCP tools that call BigQuery stored procedures.
+**ALWAYS use stored procedures.** NEVER write raw SQL queries in application code.
 
 ```typescript
-// CORRECT: MCP tool validates parameters
-await mcpClient.callTool('query_analytics', {
-  metric: 'net_sales',
-  filters: { primaryCategory: '(Beer)' },  // Validated!
-  timeframe: { type: 'relative', relative: 'today' }
+// CORRECT: Via AnalyticsToolHandler which calls stored procedures
+const result = await analyticsToolHandler.handle('show_daily_sales', {
+  startDate: '2025-05-01',
+  endDate: '2025-05-31',
+  category: '(Beer)'
 });
 
 // WRONG: Direct SQL (vulnerable to injection)
@@ -133,6 +123,12 @@ const sql = `SELECT * FROM metrics WHERE category = '${userInput}'`;
 ```
 
 **Why:** Stored procedures safely construct queries using FORMAT() with parameterized @variables.
+
+**Deployed Procedures:**
+- `restaurant_analytics.query_metrics` - Main analytics query engine
+- `insights.sp_get_daily_summary` - Daily comparisons with trends
+- `insights.sp_get_category_trends` - Week-over-week performance
+- `insights.sp_get_top_items_from_insights` - Top performers per category
 
 ### 2. MERGE Upserts for Idempotency
 
@@ -206,15 +202,9 @@ GROUP BY category;  -- Multiple rows per category!
 ### Response Engine (Port 3000)
 - **Entry:** `services/response-engine/src/index.ts`
 - **Role:** Main orchestrator, handles Google Chat webhooks
-- **Dependencies:** MCP Server, Conversation Manager, Gemini Pro
-- **Environment:** `MCP_SERVER_URL`, `CONVERSATION_MANAGER_URL`, `GEMINI_SECRET_NAME`
-
-### MCP Server (Port 3001)
-- **Entry:** `services/mcp-server/src/index.ts`
-- **Role:** Secure data access via stored procedures
-- **Tools:** `query_analytics`, `get_forecast`, `get_anomalies`
-- **SQL:** `services/mcp-server/sql/stored-procedures/`
-- **Important:** All parameters validated in `src/bigquery/Validator.ts`
+- **Dependencies:** Conversation Manager, Gemini Pro, BigQuery
+- **Environment:** `CONVERSATION_MANAGER_URL`, `GEMINI_SECRET_NAME`
+- **Key Logic:** `src/core/ResponseEngine.ts`, `src/core/ResponseGenerator.ts`, `src/tools/AnalyticsToolHandler.ts`
 
 ### Conversation Manager (Port 3002)
 - **Entry:** `services/conversation-manager/src/index.ts`
@@ -290,7 +280,7 @@ BQ_DATASET_INGESTION=ingestion
 ```
 
 ### Service-Specific
-- **Response Engine:** `MCP_SERVER_URL`, `CONVERSATION_MANAGER_URL`
+- **Response Engine:** `CONVERSATION_MANAGER_URL`
 - **Gmail Ingestion:** `GMAIL_OAUTH_SECRET_NAME`, `GMAIL_SEARCH_QUERY`
 
 ## Multi-Tenant Considerations
@@ -305,24 +295,26 @@ BQ_DATASET_INGESTION=ingestion
 
 **Design principle:** All services accept `tenantId` parameter but currently use hardcoded "senso-sushi".
 
-## Testing Notes
+## Intent Functions (8 Functions)
 
-- **Fixtures:** Test PDFs in `test-data/pdfs/`
-- **Mocks:** Mock data in `services/*/tests/fixtures/`
-- **Test BQ Dataset:** Use `fdsanalytics-test` project for integration tests
-- **Coverage:** Jest configs enforce 80-90% coverage thresholds
-- **CI/CD:** GitHub Actions runs tests on push (see `.github/workflows/`)
+1. **show_daily_sales** - Daily sales breakdown with optional category filter
+2. **compare_periods** - Compare two time periods for a metric
+3. **find_peak_day** - Find best/worst day in a period
+4. **show_top_items** - Top N items by metric
+5. **track_item_performance** - Track specific item over time
+6. **show_category_breakdown** - Sales by category for a period
+7. **compare_day_types** - Compare weekdays vs weekends
+8. **analyze_trends** - Detect trends and anomalies
 
 ## Deployment Dependencies
 
 **Deploy in this order:**
 1. BigQuery stored procedures (schema changes)
-2. MCP Server (no dependencies)
-3. Conversation Manager (no dependencies)
-4. Response Engine (depends on MCP + Conversation Manager)
-5. Gmail Ingestion (independent)
+2. Conversation Manager (no dependencies)
+3. Response Engine (depends on Conversation Manager)
+4. Gmail Ingestion (independent)
 
-**Service-to-Service Auth:** Response Engine service account needs `roles/run.invoker` on MCP Server and Conversation Manager.
+**Service-to-Service Auth:** Response Engine service account needs `roles/run.invoker` on Conversation Manager.
 
 ## Important Documentation
 
@@ -331,12 +323,32 @@ BQ_DATASET_INGESTION=ingestion
 - **Data models:** `docs/03-data-models.md`
 - **Testing strategy:** `docs/06-testing-strategy.md`
 - **Deployment guide:** `docs/07-deployment-architecture.md`
-- **Project reference:** `docs/PROJECT_INFO.md` (quick command reference)
 
 ## Key Files to Understand
 
 - `services/response-engine/src/core/ResponseEngine.ts` - Main orchestration logic
-- `services/mcp-server/src/tools/queryAnalytics.tool.ts` - Primary data access tool
+- `services/response-engine/src/core/ResponseGenerator.ts` - Gemini function calling orchestration
+- `services/response-engine/src/tools/AnalyticsToolHandler.ts` - Executes intent functions via BigQuery
+- `services/response-engine/src/tools/intentFunctions.ts` - 8 intent function definitions
 - `services/gmail-ingestion/src/parsers/PmixParser.ts` - PDF extraction with Gemini
 - `shared/utils/logger.ts` - Structured logging pattern used everywhere
 - `docker-compose.yml` - Local development environment setup
+- `sql/stored-procedures/query_metrics.sql` - Main analytics query engine
+- `scripts/testing/test-all-intent-functions.sh` - Automated test harness
+
+## Recent Improvements
+
+- **October 2025:** Deployed all 7 missing BigQuery stored procedures
+- **October 2025:** Fixed SQL column alias bugs in query_metrics procedure
+- **October 2025:** Built comprehensive automated test suite with AI validation
+- **October 2025:** Achieved 93.3% test success rate (up from 60%)
+- **October 2025:** Removed MCP server, simplified to direct BigQuery calls
+- **October 2025:** Added response preview logging for debugging
+
+## Performance Notes
+
+- Response Engine typically responds in 6-12 seconds
+- Insights queries (fast path) complete in 1-2 seconds
+- Stored procedure queries (slow path) complete in 4-8 seconds
+- Conversation context disabled for performance (saves 4-6 seconds)
+- Chart generation adds 2-3 seconds when enabled

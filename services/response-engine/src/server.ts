@@ -1,6 +1,5 @@
 import express, { Request, Response } from 'express';
 import { ResponseEngine } from './core/ResponseEngine';
-import { MCPClient } from './clients/MCPClient';
 import { ConversationClient } from './clients/ConversationClient';
 import { GeminiClient } from './clients/GeminiClient';
 import { Config } from './config/config';
@@ -18,7 +17,6 @@ export function createServer(config: Config): express.Application {
   app.use(express.json());
 
   // Initialize clients
-  const mcpClient = new MCPClient(config.mcpServerUrl);
   const conversationClient = new ConversationClient(config.conversationManagerUrl);
   const geminiClient = new GeminiClient(
     config.projectId,
@@ -29,7 +27,6 @@ export function createServer(config: Config): express.Application {
   // Initialize ResponseEngine
   const responseEngine = new ResponseEngine(
     config,
-    mcpClient,
     conversationClient,
     geminiClient
   );

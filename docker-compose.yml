@@ -13,7 +13,6 @@ services:
       - ENVIRONMENT=development
       - LOG_LEVEL=debug
       - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
-      - MCP_SERVER_URL=http://mcp-server:8080
       - CONVERSATION_MANAGER_URL=http://conversation-manager:8080
       - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
       - BQ_DATASET_INSIGHTS=${BQ_DATASET_INSIGHTS:-insights}
@@ -23,28 +22,7 @@ services:
     volumes:
       - ./services/response-engine/src:/app/src
     depends_on:
-      - mcp-server
       - conversation-manager
-    networks:
-      - fdsanalytics
-
-  mcp-server:
-    build:
-      context: ./services/mcp-server
-      dockerfile: Dockerfile
-    ports:
-      - "3001:8080"
-    environment:
-      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
-      - REGION=${REGION:-us-central1}
-      - ENVIRONMENT=development
-      - LOG_LEVEL=debug
-      - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
-      - BQ_DATASET_INSIGHTS=${BQ_DATASET_INSIGHTS:-insights}
-      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
-      - PORT=8080
-    volumes:
-      - ./services/mcp-server/src:/app/src
     networks:
       - fdsanalytics
 

@@ -1,4 +1,3 @@
-import { MCPClient } from '../clients/MCPClient';
 import { GeminiClient } from '../clients/GeminiClient';
 import { ChartBuilder } from '../chart/ChartBuilder';
 import { ChartTypeSelector } from '../chart/ChartTypeSelector';
@@ -48,8 +47,8 @@ interface ToolCall {
  * ResponseGenerator - Core orchestration logic
  *
  * Handles:
- * - Using Gemini Pro to determine which MCP tools to call
- * - Calling MCP tools with appropriate parameters
+ * - Using Gemini Pro with function calling to execute analytics queries
+ * - Calling BigQuery stored procedures via AnalyticsToolHandler
  * - Generating conversational responses
  * - Creating charts when appropriate
  */
@@ -59,7 +58,6 @@ export class ResponseGenerator {
   private analyticsToolHandler: AnalyticsToolHandler;
 
   constructor(
-    private mcpClient: MCPClient,
     private geminiClient: GeminiClient,
     private enableCharts: boolean = true,
     private maxChartDatapoints: number = 100
@@ -222,23 +220,6 @@ export class ResponseGenerator {
       chartTitle,
       toolCallsMade: toolCalls
     };
-  }
-
-  /**
-   * Get MCP tool definitions for Gemini function calling
-   */
-  private async getMCPToolDefinitions(): Promise<Array<{
-    name: string;
-    description: string;
-    parameters: any;
-  }>> {
-    const tools = await this.mcpClient.listTools();
-
-    return tools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema
-    }));
   }
 
   /**
@@ -526,7 +507,7 @@ IMPORTANT: When users mention months without specifying a year (e.g., "May and J
       return 'That query took too long. Try narrowing your date range or category.';
     }
 
-    if (error.message?.includes('MCP Server unavailable')) {
+    if (error.message?.includes('BigQuery') || error.message?.includes('unavailable')) {
       return 'I\'m having trouble accessing the data right now. Please try again in a moment.';
     }
 

@@ -101,7 +101,7 @@ claude-code --agent data "Add new stored procedure for X"
 claude-code --agent orchestration "Improve chart generation logic"
 
 # If adding tests:
-claude-code --agent testing "Add integration tests for BigQuery analytics"
+claude-code --agent testing "Add integration tests for MCP server"
 
 # If updating deployment:
 claude-code --agent devops "Update Cloud Run memory limits"

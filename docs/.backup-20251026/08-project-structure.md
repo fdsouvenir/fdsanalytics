@@ -77,7 +77,7 @@ services/response-engine/
 │   │   └── ResponseFormatter.ts      # Format for Google Chat
 │   │
 │   ├── clients/
-│   │   ├── AnalyticsToolHandler.ts              # Call BigQuery analytics
+│   │   ├── MCPClient.ts              # Call MCP server
 │   │   ├── ConversationClient.ts    # Call conversation manager
 │   │   └── GoogleChatClient.ts       # Send messages to Chat
 │   │
@@ -152,14 +152,14 @@ app.listen(port, () => {
 
 ### src/core/ResponseEngine.ts
 ```typescript
-import { AnalyticsToolHandler } from '../clients/AnalyticsToolHandler';
+import { MCPClient } from '../clients/MCPClient';
 import { ConversationClient } from '../clients/ConversationClient';
 import { ResponseGenerator } from './ResponseGenerator';
 import { TenantResolver } from './TenantResolver';
 
 export class ResponseEngine {
   constructor(
-    private analyticsHandler: AnalyticsToolHandler,
+    private mcpClient: MCPClient,
     private conversationClient: ConversationClient,
     private tenantResolver: TenantResolver
   ) {}
@@ -187,7 +187,7 @@ export class ResponseEngine {
     );
     
     // 3. Generate response
-    const generator = new ResponseGenerator(this.analyticsHandler);
+    const generator = new ResponseGenerator(this.mcpClient);
     const result = await generator.generate({
       userMessage: request.message,
       context,
@@ -210,7 +210,7 @@ export class ResponseEngine {
 services/response-engine/
 ├── src/
 │   ├── index.ts                      # Entry point (Cloud Run)
-│   ├── server.ts                     # Direct BigQuery server
+│   ├── server.ts                     # MCP protocol server
 │   │
 │   ├── tools/
 │   │   ├── queryAnalytics.tool.ts    # Main query tool
@@ -223,7 +223,7 @@ services/response-engine/
 │   │   └── Validator.ts              # Parameter validation
 │   │
 │   ├── schemas/
-│   │   ├── toolSchemas.ts            # BQHandler tool definitions
+│   │   ├── toolSchemas.ts            # MCP tool definitions
 │   │   └── paramSchemas.ts           # Parameter validation schemas
 │   │
 │   └── config/
@@ -446,7 +446,7 @@ shared/
 │   ├── chat.types.ts                 # Google Chat message types
 │   ├── bigquery.types.ts             # BQ result types
 │   ├── tenant.types.ts               # Tenant config types
-│   ├── analytics.types.ts                  # Direct BigQuery types
+│   ├── mcp.types.ts                  # MCP protocol types
 │   └── index.ts                      # Re-export all
 │
 ├── utils/
@@ -620,7 +620,7 @@ echo "📦 Deploying BigQuery analytics..."
 echo "💬 Deploying Conversation Manager..."
 ./scripts/deploy/deploy-conversation-manager.sh
 
-# 3. Deploy Response Engine (depends on BigQuery Conversation Manager)
+# 3. Deploy Response Engine (depends on MCP + Conversation Manager)
 echo "🤖 Deploying Response Engine..."
 
 # 4. Deploy Gmail Ingestion (independent)
@@ -650,7 +650,7 @@ docs/
 │
 ├── api/
 │   ├── response-engine-api.md
-│   ├── analytics-protocol.md
+│   ├── mcp-protocol.md
 │   └── google-chat-webhook.md
 │
 └── runbooks/

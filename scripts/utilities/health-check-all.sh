@@ -110,7 +110,7 @@ check_function() {
 
 # Check all services
 check_cloudrun_service "response-engine" "true"
-check_cloudrun_service "mcp-server" "false"
+check_cloudrun_service "response-engine" "false"
 check_cloudrun_service "conversation-manager" "false"
 check_function "gmail-ingestion"
 

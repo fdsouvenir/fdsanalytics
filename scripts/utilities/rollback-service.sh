@@ -20,7 +20,7 @@ if [ $# -lt 1 ]; then
   echo ""
   echo "Available services:"
   echo "  - response-engine"
-  echo "  - mcp-server"
+  echo "  - response-engine"
   echo "  - conversation-manager"
   echo ""
   echo "Example: $0 response-engine"
