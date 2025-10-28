@@ -143,6 +143,8 @@ export class ResponseEngine {
         message: 'Response generated successfully',
         userId: request.userId,
         tenantId: tenantConfig.tenantId,
+        userMessage: request.message,
+        responseText: result.responseText,
         totalDurationMs: totalDuration,
         timings: {
           resolveTenant: timings.resolveTenant,

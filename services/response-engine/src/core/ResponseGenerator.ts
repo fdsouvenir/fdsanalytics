@@ -81,7 +81,7 @@ export class ResponseGenerator {
     try {
       // Step 1: Build system instruction and conversation history
       const step1Start = Date.now();
-      const systemInstruction = this.buildSystemInstruction(input);
+      const systemInstruction = await this.buildSystemInstruction(input);
       const conversationHistory = this.buildConversationHistory(input.context);
       timings.buildContext = Date.now() - step1Start;
 
@@ -159,7 +159,7 @@ export class ResponseGenerator {
         );
 
         if (resultValidation.isEmpty) {
-          responseText = this.formatEmptyResultResponse(chatResult.functionCall.args);
+          responseText = await this.formatEmptyResultResponse(chatResult.functionCall.args);
         } else {
           responseText = chatResult.responseText;
 
@@ -226,15 +226,31 @@ export class ResponseGenerator {
    * Build system instruction for Gemini (persistent context)
    * Minimal instruction - rely on tool schema and multi-turn chat for the rest
    */
-  private buildSystemInstruction(input: ResponseGeneratorInput): string {
+  private async buildSystemInstruction(input: ResponseGeneratorInput): Promise<string> {
     const currentYear = input.currentDateTime.getFullYear();
+
+    // Get data availability dates dynamically
+    const latestDate = await this.analyticsToolHandler.getLatestAvailableDate();
+    const firstDate = await this.analyticsToolHandler.getFirstAvailableDate();
+
+    let dataAvailabilityNote = '';
+    if (latestDate) {
+      dataAvailabilityNote = `\nData availability: Reports are available through ${latestDate}.`;
+    }
+    if (firstDate) {
+      dataAvailabilityNote += `\nData starts from: ${firstDate}.`;
+    }
+
     return `You are an analytics assistant for ${input.tenantConfig.businessName}.
 Business timezone: ${input.tenantConfig.timezone}
 Currency: ${input.tenantConfig.currency}
 Current date and time: ${input.currentDateTime.toISOString()}
-Current year: ${currentYear}
+Current year: ${currentYear}${dataAvailabilityNote}
 
-IMPORTANT: When users mention months without specifying a year (e.g., "May and June"), assume they mean the current year (${currentYear}) unless context suggests otherwise.`;
+IMPORTANT:
+- When users mention months without specifying a year (e.g., "May and June"), assume they mean the current year (${currentYear}) unless context suggests otherwise.
+- When users say "last month", "this month", "last quarter", etc., calculate the actual dates based on the current date above.
+- If querying for dates beyond the latest available data, explain that data is only available through ${latestDate || 'the latest report date'}.`;
   }
 
   /**
@@ -463,33 +479,62 @@ IMPORTANT: When users mention months without specifying a year (e.g., "May and J
   /**
    * Format empty result response with helpful suggestions
    */
-  private formatEmptyResultResponse(queryParams: any): string {
+  private async formatEmptyResultResponse(queryParams: any): Promise<string> {
     const suggestions: string[] = [];
+
+    // Get data availability dates
+    const latestDate = await this.analyticsToolHandler.getLatestAvailableDate();
+    const firstDate = await this.analyticsToolHandler.getFirstAvailableDate();
 
     suggestions.push('No data found for that query.');
     suggestions.push('');
-    suggestions.push('Try:');
 
-    // Suggest expanding date range
-    if (queryParams.timeframe) {
-      suggestions.push('• Expanding your date range');
-    }
+    // Check if query dates are outside available range
+    let dateIssue = false;
+    if (queryParams.start_date && latestDate) {
+      const queryStart = new Date(queryParams.start_date);
+      const latest = new Date(latestDate);
 
-    // Suggest removing filters
-    if (queryParams.filters?.primaryCategory) {
-      suggestions.push('• Using a different category');
-    }
-    if (queryParams.filters?.subcategory) {
-      suggestions.push('• Removing the subcategory filter');
-    }
-    if (queryParams.filters?.itemName) {
-      suggestions.push('• Searching for a different item');
+      if (queryStart > latest) {
+        suggestions.push(`Note: Data is only available through ${latestDate}.`);
+        dateIssue = true;
+      }
     }
 
-    // Generic suggestions
-    if (suggestions.length === 3) {  // Only "Try:" added
-      suggestions.push('• Checking your filters');
-      suggestions.push('• Using a broader search');
+    if (queryParams.start_date && firstDate) {
+      const queryStart = new Date(queryParams.start_date);
+      const first = new Date(firstDate);
+
+      if (queryStart < first) {
+        suggestions.push(`Note: Data starts from ${firstDate}.`);
+        dateIssue = true;
+      }
+    }
+
+    if (!dateIssue) {
+      suggestions.push('Try:');
+
+      // Suggest expanding date range
+      if (queryParams.start_date || queryParams.end_date) {
+        suggestions.push('• Expanding your date range');
+      }
+
+      // Suggest removing filters
+      if (queryParams.primary_category) {
+        suggestions.push('• Using a different category');
+      }
+      if (queryParams.subcategory) {
+        suggestions.push('• Removing the subcategory filter');
+      }
+      if (queryParams.item_name) {
+        suggestions.push('• Searching for a different item');
+      }
+
+      // Generic suggestions
+      if (suggestions.length === 3) {  // Only "Try:" added
+        suggestions.push('• Checking your filters');
+        suggestions.push('• Using a broader search');
+      }
     }
 
     return suggestions.join('\n');

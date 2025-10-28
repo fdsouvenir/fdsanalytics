@@ -16,6 +16,8 @@ export class AnalyticsToolHandler {
   private dataset: string;
   private customerId: string;
   private primaryCategoriesCache: string[] | null = null;
+  private latestDateCache: string | null = null;
+  private firstDateCache: string | null = null;
 
   constructor(
     projectId: string = 'fdsanalytics',
@@ -361,11 +363,11 @@ export class AnalyticsToolHandler {
     comparison: 'weekday_vs_weekend' | 'by_day_of_week';
     category?: string;
   }): Promise<ToolResult> {
-    // For now, get daily data and let Gemini do the comparison in text
-    // Future: could add specialized stored procedure for this
+    const startTime = Date.now();
     const { primaryCategory, subcategory } = await this.parseCategory(args.category);
 
-    return this.callStoredProcedure('query_metrics', {
+    // Get daily data first
+    const dailyData = await this.callStoredProcedure('query_metrics', {
       metric_name: 'net_sales',
       start_date: args.startDate,
       end_date: args.endDate,
@@ -380,6 +382,58 @@ export class AnalyticsToolHandler {
       order_by_field: 'date',
       order_direction: 'ASC'
     });
+
+    // Aggregate by day type
+    const aggregated = this.aggregateByDayType(dailyData.rows, args.comparison);
+
+    return {
+      rows: aggregated,
+      totalRows: aggregated.length,
+      executionTimeMs: Date.now() - startTime
+    };
+  }
+
+  /**
+   * Aggregate daily data by day type (weekday vs weekend)
+   */
+  private aggregateByDayType(dailyRows: any[], comparison: string): any[] {
+    const weekdayTotal = { total: 0, days: 0, dayType: 'Weekday' };
+    const weekendTotal = { total: 0, days: 0, dayType: 'Weekend' };
+
+    for (const row of dailyRows) {
+      const date = new Date(row.report_date || row.date);
+      const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+      const value = parseFloat(row.metric_value || row.total || 0);
+
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        // Weekend (Saturday or Sunday)
+        weekendTotal.total += value;
+        weekendTotal.days++;
+      } else {
+        // Weekday (Monday-Friday)
+        weekdayTotal.total += value;
+        weekdayTotal.days++;
+      }
+    }
+
+    // Calculate averages
+    const weekdayAvg = weekdayTotal.days > 0 ? weekdayTotal.total / weekdayTotal.days : 0;
+    const weekendAvg = weekendTotal.days > 0 ? weekendTotal.total / weekendTotal.days : 0;
+
+    return [
+      {
+        day_type: 'Weekday',
+        total_sales: weekdayTotal.total.toFixed(2),
+        average_sales: weekdayAvg.toFixed(2),
+        num_days: weekdayTotal.days
+      },
+      {
+        day_type: 'Weekend',
+        total_sales: weekendTotal.total.toFixed(2),
+        average_sales: weekendAvg.toFixed(2),
+        num_days: weekendTotal.days
+      }
+    ];
   }
 
   /**
@@ -390,21 +444,83 @@ export class AnalyticsToolHandler {
     startDate: string;
     endDate: string;
   }): Promise<ToolResult> {
-    return this.callStoredProcedure('query_metrics', {
-      metric_name: 'net_sales',
-      start_date: args.startDate,
-      end_date: args.endDate,
-      primary_category: null,
-      subcategory: null,
-      item_name: args.itemName,
-      aggregation: 'SUM',
-      group_by_fields: 'date',
-      baseline_start_date: null,
-      baseline_end_date: null,
-      max_rows: 100,
-      order_by_field: 'date',
-      order_direction: 'ASC'
-    });
+    try {
+      // Try exact match first
+      const result = await this.callStoredProcedure('query_metrics', {
+        metric_name: 'net_sales',
+        start_date: args.startDate,
+        end_date: args.endDate,
+        primary_category: null,
+        subcategory: null,
+        item_name: args.itemName,
+        aggregation: 'SUM',
+        group_by_fields: 'date',
+        baseline_start_date: null,
+        baseline_end_date: null,
+        max_rows: 100,
+        order_by_field: 'date',
+        order_direction: 'ASC'
+      });
+
+      // If we got results, return them
+      if (result.rows && result.rows.length > 0) {
+        return result;
+      }
+
+      // No results - try to find similar item names
+      const suggestions = await this.findSimilarItemNames(args.itemName);
+
+      if (suggestions.length > 0) {
+        console.log(JSON.stringify({
+          severity: 'INFO',
+          message: 'Item not found but suggestions available',
+          searchedFor: args.itemName,
+          suggestions: suggestions
+        }));
+
+        // Return empty result with suggestion metadata
+        return {
+          rows: [],
+          totalRows: 0,
+          executionTimeMs: result.executionTimeMs,
+         };
+      }
+
+      // No data and no suggestions
+      return result;
+    } catch (error: any) {
+      console.error('Error in trackItemPerformance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Find similar item names using partial matching
+   */
+  private async findSimilarItemNames(searchTerm: string): Promise<string[]> {
+    try {
+      // Search for items that contain the search term (case-insensitive)
+      const query = `
+        SELECT DISTINCT item_name
+        FROM \`${this.projectId}.${this.dataset}.metrics\`
+        WHERE LOWER(item_name) LIKE LOWER(@search_pattern)
+        LIMIT 5
+      `;
+
+      const [rows] = await this.bqClient.query({
+        query,
+        params: {
+          search_pattern: `%${searchTerm}%`
+        },
+        location: 'us-central1',
+        jobTimeoutMs: 5000
+      });
+
+      return rows.map((row: any) => row.item_name);
+    } catch (error: any) {
+      console.warn('Failed to find similar item names:', error.message);
+      return [];
+    }
   }
 
   /**
@@ -435,6 +551,110 @@ export class AnalyticsToolHandler {
       order_by_field: 'metric_value',
       order_direction: 'DESC'
     });
+  }
+
+  /**
+   * Get latest available date in the dataset (with caching)
+   */
+  async getLatestAvailableDate(): Promise<string | null> {
+    if (this.latestDateCache) {
+      return this.latestDateCache;
+    }
+
+    try {
+      const query = `
+        SELECT MAX(report_date) as latest_date
+        FROM \`${this.projectId}.${this.dataset}.reports\`
+        WHERE customer_id = @customer_id
+      `;
+
+      const [rows] = await this.bqClient.query({
+        query,
+        params: { customer_id: this.customerId },
+        location: 'us-central1',
+        jobTimeoutMs: 5000
+      });
+
+      if (rows && rows.length > 0 && rows[0].latest_date) {
+        this.latestDateCache = this.formatBigQueryDate(rows[0].latest_date);
+
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Latest available date cached',
+          date: this.latestDateCache
+        }));
+
+        return this.latestDateCache;
+      }
+
+      return null;
+    } catch (error: any) {
+      console.warn('Failed to fetch latest available date:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get first available date in the dataset (with caching)
+   */
+  async getFirstAvailableDate(): Promise<string | null> {
+    if (this.firstDateCache) {
+      return this.firstDateCache;
+    }
+
+    try {
+      const query = `
+        SELECT MIN(report_date) as first_date
+        FROM \`${this.projectId}.${this.dataset}.reports\`
+        WHERE customer_id = @customer_id
+      `;
+
+      const [rows] = await this.bqClient.query({
+        query,
+        params: { customer_id: this.customerId },
+        location: 'us-central1',
+        jobTimeoutMs: 5000
+      });
+
+      if (rows && rows.length > 0 && rows[0].first_date) {
+        this.firstDateCache = this.formatBigQueryDate(rows[0].first_date);
+
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'First available date cached',
+          date: this.firstDateCache
+        }));
+
+        return this.firstDateCache;
+      }
+
+      return null;
+    } catch (error: any) {
+      console.warn('Failed to fetch first available date:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Format BigQuery date object to YYYY-MM-DD string
+   */
+  private formatBigQueryDate(dateValue: any): string {
+    if (typeof dateValue === 'string') {
+      // Already formatted or ISO string
+      return dateValue.split('T')[0];
+    }
+
+    if (dateValue && dateValue.value) {
+      // BigQuery Date object
+      return dateValue.value;
+    }
+
+    // Fallback: try to parse as date
+    const date = new Date(dateValue);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   /**

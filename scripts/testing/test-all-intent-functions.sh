@@ -29,7 +29,7 @@ PROJECT_ID="fdsanalytics"
 REGION="us-central1"
 REVISION=""
 OUTPUT_DIR="$PROJECT_ROOT/test-results"
-WAIT_TIME=30
+WAIT_TIME=60  # Increased from 30 to allow Cloud Logging propagation
 TEST_FUNCTION=""
 CONTINUOUS_MODE=false
 
@@ -92,6 +92,9 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 RUN_DIR="$OUTPUT_DIR/run-$TIMESTAMP"
 mkdir -p "$RUN_DIR"
 
+# Initialize markdown report
+REPORT_FILE="$RUN_DIR/TEST_REPORT.md"
+
 # Load test queries from JSON
 QUERIES_FILE="$SCRIPT_DIR/test-queries.json"
 if [ ! -f "$QUERIES_FILE" ]; then
@@ -105,6 +108,7 @@ SUCCESSFUL_TESTS=0
 FAILED_TESTS=0
 FALLBACK_USED=0
 declare -A FUNCTION_STATS
+declare -A FUNCTION_TIMINGS  # Track timing stats per function
 
 # Function to send a test query
 send_query() {
@@ -119,10 +123,26 @@ send_query() {
 
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
+    # Write markdown section header
+    cat >> "$REPORT_FILE" <<EOF
+
+---
+
+## Test ${test_id}: ${function_name}
+
+**Query:** "${query}"
+
+EOF
+
     # Get auth token
     TOKEN=$(gcloud auth print-identity-token 2>/dev/null)
     if [ -z "$TOKEN" ]; then
         echo -e "${RED}✗ Failed to get auth token${NC}"
+        cat >> "$REPORT_FILE" <<EOF
+**Status:** ✗ FAILED
+**Reason:** Failed to get auth token
+
+EOF
         FAILED_TESTS=$((FAILED_TESTS + 1))
         return 1
     fi
@@ -131,7 +151,7 @@ send_query() {
     LOG_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
 
     # Create Google Chat webhook payload
-    PAYLOAD=$(cat <<EOF
+    PAYLOAD=$(cat <<EOFPAYLOAD
 {
   "chat": {
     "user": {
@@ -155,7 +175,7 @@ send_query() {
     }
   }
 }
-EOF
+EOFPAYLOAD
 )
 
     # Send request
@@ -170,6 +190,11 @@ EOF
 
     if [ "$HTTP_CODE" != "200" ]; then
         echo -e "${RED}✗ Request failed (HTTP $HTTP_CODE)${NC}"
+        cat >> "$REPORT_FILE" <<EOF
+**Status:** ✗ FAILED
+**Reason:** HTTP $HTTP_CODE error
+
+EOF
         FAILED_TESTS=$((FAILED_TESTS + 1))
         return 1
     fi
@@ -177,55 +202,111 @@ EOF
     # Wait for async processing
     sleep $WAIT_TIME
 
-    # Fetch logs for this query
+    # Fetch logs with full response details
     gcloud logging read \
         "resource.type=cloud_run_revision AND \
          resource.labels.service_name=response-engine AND \
          resource.labels.revision_name=$REVISION AND \
          timestamp>=\"$LOG_TIMESTAMP\" AND \
-         jsonPayload.message=\"Final text response received\"" \
+         jsonPayload.message=\"Response generated successfully\"" \
         --limit 1 \
         --format=json \
-        --project=$PROJECT_ID > "$RUN_DIR/test-${test_id}-${function_name}.json" 2>/dev/null
+        --project=$PROJECT_ID > "/tmp/test-${test_id}.json" 2>/dev/null
 
-    if [ -s "$RUN_DIR/test-${test_id}-${function_name}.json" ]; then
-        local text_length=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.textLength // 0')
-        local used_fallback=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.usedFallback // false')
-        local response_preview=$(cat "$RUN_DIR/test-${test_id}-${function_name}.json" | jq -r '.[0].jsonPayload.responsePreview // ""')
+    if [ -s "/tmp/test-${test_id}.json" ]; then
+        local response_text=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.responseText // ""')
+        local total_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.totalDurationMs // 0')
+        local resolve_tenant_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.timings.resolveTenant // 0')
+        local get_context_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.timings.getContext // 0')
+        local generate_response_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.timings.generateResponse // 0')
+        local format_response_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.timings.formatResponse // 0')
+        local tool_calls=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.toolCallsCount // 0')
+        local chart_generated=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.chartGenerated // false')
 
-        # Display response preview if available
-        if [ -n "$response_preview" ] && [ "$response_preview" != "null" ]; then
-            echo -e "${CYAN}Response: \"${response_preview}...\"${NC}"
-            # Save to file for reference
-            echo "$response_preview" > "$RUN_DIR/test-${test_id}-${function_name}-response.txt"
+        # Display response preview
+        if [ -n "$response_text" ] && [ "$response_text" != "null" ]; then
+            local preview="${response_text:0:200}"
+            echo -e "${CYAN}Response: \"${preview}...\"${NC}"
         fi
 
-        if [ "$text_length" -gt 0 ]; then
-            # Validate response quality with Claude CLI (if response preview available)
+        # Write answer to markdown
+        cat >> "$REPORT_FILE" <<EOF
+**Answer:**
+> $(echo "$response_text" | sed 's/^/> /g')
+
+EOF
+
+        # Calculate percentages for timing breakdown
+        local resolve_pct=0
+        local context_pct=0
+        local generate_pct=0
+        local format_pct=0
+        if [ "$total_ms" -gt 0 ]; then
+            resolve_pct=$(echo "scale=1; $resolve_tenant_ms * 100 / $total_ms" | bc 2>/dev/null || echo "0")
+            context_pct=$(echo "scale=1; $get_context_ms * 100 / $total_ms" | bc 2>/dev/null || echo "0")
+            generate_pct=$(echo "scale=1; $generate_response_ms * 100 / $total_ms" | bc 2>/dev/null || echo "0")
+            format_pct=$(echo "scale=1; $format_response_ms * 100 / $total_ms" | bc 2>/dev/null || echo "0")
+        fi
+
+        # Convert milliseconds to seconds for display
+        local total_sec=$(echo "scale=1; $total_ms / 1000" | bc 2>/dev/null || echo "0")
+
+        # Write timing breakdown to markdown
+        cat >> "$REPORT_FILE" <<EOF
+**Timing Breakdown:**
+- **Total Duration:** ${total_ms}ms (${total_sec}s)
+  - Resolve Tenant: ${resolve_tenant_ms}ms (${resolve_pct}%)
+  - Get Context: ${get_context_ms}ms (${context_pct}%)
+  - Generate Response: ${generate_response_ms}ms (${generate_pct}%)
+  - Format Response: ${format_response_ms}ms (${format_pct}%)
+
+EOF
+
+        if [ ${#response_text} -gt 0 ]; then
+            # Validate response quality
             local is_valid="true"
             local validation_reason=""
 
-            if [ -n "$response_preview" ] && [ "$response_preview" != "null" ]; then
-                local validation=$("$SCRIPT_DIR/lib/validate-response.sh" "$query" "$response_preview" 2>/dev/null)
+            local validation=$("$SCRIPT_DIR/lib/validate-response.sh" "$query" "$response_text" 2>/dev/null)
 
-                if [ -n "$validation" ]; then
-                    is_valid=$(echo "$validation" | jq -r '.valid // true' 2>/dev/null)
-                    validation_reason=$(echo "$validation" | jq -r '.reason // ""' 2>/dev/null)
-                fi
+            if [ -n "$validation" ]; then
+                is_valid=$(echo "$validation" | jq -r '.valid // true' 2>/dev/null)
+                validation_reason=$(echo "$validation" | jq -r '.reason // ""' 2>/dev/null)
             fi
 
             if [ "$is_valid" = "true" ]; then
-                echo -e "${GREEN}✓ SUCCESS${NC} (textLength: $text_length)"
+                echo -e "${GREEN}✓ SUCCESS${NC} (${total_ms}ms)"
 
                 if [ -n "$validation_reason" ]; then
                     echo -e "${BLUE}  ✓ Validated: $validation_reason${NC}"
                 fi
 
+                # Write success status to markdown
+                cat >> "$REPORT_FILE" <<EOF
+**Status:** ✓ PASSED
+**Tool Calls:** $tool_calls
+**Chart Generated:** $chart_generated
+**Validation:** $validation_reason
+
+EOF
+
                 SUCCESSFUL_TESTS=$((SUCCESSFUL_TESTS + 1))
 
-                if [ "$used_fallback" = "true" ]; then
-                    echo -e "${BLUE}  ℹ Fallback pattern used${NC}"
-                    FALLBACK_USED=$((FALLBACK_USED + 1))
+                # Track timing stats
+                if [ -z "${FUNCTION_TIMINGS[$function_name]}" ]; then
+                    FUNCTION_TIMINGS[$function_name]="$total_ms:$total_ms:$total_ms:1"  # min:max:sum:count
+                else
+                    local min=$(echo "${FUNCTION_TIMINGS[$function_name]}" | cut -d: -f1)
+                    local max=$(echo "${FUNCTION_TIMINGS[$function_name]}" | cut -d: -f2)
+                    local sum=$(echo "${FUNCTION_TIMINGS[$function_name]}" | cut -d: -f3)
+                    local count=$(echo "${FUNCTION_TIMINGS[$function_name]}" | cut -d: -f4)
+
+                    [ "$total_ms" -lt "$min" ] && min=$total_ms
+                    [ "$total_ms" -gt "$max" ] && max=$total_ms
+                    sum=$((sum + total_ms))
+                    count=$((count + 1))
+
+                    FUNCTION_TIMINGS[$function_name]="$min:$max:$sum:$count"
                 fi
 
                 # Update function stats
@@ -243,6 +324,13 @@ EOF
                     echo -e "${RED}  Reason: $validation_reason${NC}"
                 fi
 
+                # Write failure to markdown
+                cat >> "$REPORT_FILE" <<EOF
+**Status:** ✗ FAILED
+**Reason:** Invalid response - $validation_reason
+
+EOF
+
                 FAILED_TESTS=$((FAILED_TESTS + 1))
 
                 # Update function stats
@@ -256,6 +344,12 @@ EOF
             fi
         else
             echo -e "${RED}✗ FAILED${NC} (empty response)"
+
+            cat >> "$REPORT_FILE" <<EOF
+**Status:** ✗ FAILED
+**Reason:** Empty response
+
+EOF
             FAILED_TESTS=$((FAILED_TESTS + 1))
 
             # Update function stats
@@ -267,8 +361,17 @@ EOF
                 FUNCTION_STATS[$function_name]="$success:$((fail + 1))"
             fi
         fi
+
+        # Clean up temp file
+        rm -f "/tmp/test-${test_id}.json"
     else
         echo -e "${RED}✗ NO RESPONSE${NC}"
+
+        cat >> "$REPORT_FILE" <<EOF
+**Status:** ✗ FAILED
+**Reason:** No response log found
+
+EOF
         FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
 }
@@ -289,12 +392,23 @@ run_tests() {
     echo "Time:       $(date)"
     echo ""
 
+    # Initialize markdown report
+    cat > "$REPORT_FILE" <<EOF
+# Test Run Report
+
+**Date:** $(date)
+**Revision:** $REVISION
+**Service URL:** $SERVICE_URL
+
+EOF
+
     # Reset stats for this run
     TOTAL_TESTS=0
     SUCCESSFUL_TESTS=0
     FAILED_TESTS=0
     FALLBACK_USED=0
     declare -gA FUNCTION_STATS
+    declare -gA FUNCTION_TIMINGS
 
     # Read and execute test queries
     local test_id=0
@@ -341,11 +455,28 @@ generate_summary() {
     echo "Total Tests:      $TOTAL_TESTS"
     echo "Successful:       $SUCCESSFUL_TESTS"
     echo "Failed:           $FAILED_TESTS"
-    echo "Fallback Used:    $FALLBACK_USED"
     echo "Success Rate:     ${success_rate}%"
     echo ""
 
-    # Function breakdown
+    # Write summary section to markdown
+    cat >> "$REPORT_FILE" <<EOF
+
+---
+
+# Summary
+
+## Overall Results
+
+- **Total Tests:** $TOTAL_TESTS
+- **Successful:** $SUCCESSFUL_TESTS
+- **Failed:** $FAILED_TESTS
+- **Success Rate:** ${success_rate}%
+
+## Function Breakdown
+
+EOF
+
+    # Function breakdown with timing stats
     echo -e "${YELLOW}Function Breakdown:${NC}"
     for function_name in "${!FUNCTION_STATS[@]}"; do
         local stats="${FUNCTION_STATS[$function_name]}"
@@ -354,49 +485,44 @@ generate_summary() {
         local total=$((success + fail))
         local rate=0
         if [ $total -gt 0 ]; then
-            rate=$(echo "scale=1; $success * 100 / $total" | bc)
+            rate=$(echo "scale=1; $success * 100 / $total" | bc 2>/dev/null || echo "0")
         fi
         printf "  %-25s %d/%d (%.1f%%)\n" "$function_name" $success $total $rate
+
+        # Add to markdown with timing stats
+        echo "### $function_name" >> "$REPORT_FILE"
+        echo "" >> "$REPORT_FILE"
+        echo "- **Pass Rate:** $success/$total (${rate}%)" >> "$REPORT_FILE"
+
+        # Add timing statistics if available
+        if [ -n "${FUNCTION_TIMINGS[$function_name]}" ]; then
+            local timings="${FUNCTION_TIMINGS[$function_name]}"
+            local min=$(echo "$timings" | cut -d: -f1)
+            local max=$(echo "$timings" | cut -d: -f2)
+            local sum=$(echo "$timings" | cut -d: -f3)
+            local count=$(echo "$timings" | cut -d: -f4)
+            local avg=0
+            if [ $count -gt 0 ]; then
+                avg=$((sum / count))
+            fi
+
+            local min_sec=$(echo "scale=1; $min / 1000" | bc 2>/dev/null || echo "0")
+            local max_sec=$(echo "scale=1; $max / 1000" | bc 2>/dev/null || echo "0")
+            local avg_sec=$(echo "scale=1; $avg / 1000" | bc 2>/dev/null || echo "0")
+
+            echo "- **Timing (ms):**" >> "$REPORT_FILE"
+            echo "  - Min: ${min}ms (${min_sec}s)" >> "$REPORT_FILE"
+            echo "  - Avg: ${avg}ms (${avg_sec}s)" >> "$REPORT_FILE"
+            echo "  - Max: ${max}ms (${max_sec}s)" >> "$REPORT_FILE"
+
+            printf "    Timing: min=${min}ms avg=${avg}ms max=${max}ms\n"
+        fi
+        echo "" >> "$REPORT_FILE"
     done
 
     echo ""
-    echo -e "${CYAN}Results saved to: $RUN_DIR${NC}"
+    echo -e "${CYAN}Report saved to: $REPORT_FILE${NC}"
     echo ""
-
-    # Save summary to file
-    cat > "$RUN_DIR/SUMMARY.md" <<EOF
-# Test Run Summary
-
-**Date:** $(date)
-**Revision:** $REVISION
-
-## Overall Results
-
-- **Total Tests:** $TOTAL_TESTS
-- **Successful:** $SUCCESSFUL_TESTS
-- **Failed:** $FAILED_TESTS
-- **Fallback Used:** $FALLBACK_USED
-- **Success Rate:** ${success_rate}%
-
-## Function Breakdown
-
-$(for function_name in "${!FUNCTION_STATS[@]}"; do
-    stats="${FUNCTION_STATS[$function_name]}"
-    success=$(echo "$stats" | cut -d: -f1)
-    fail=$(echo "$stats" | cut -d: -f2)
-    total=$((success + fail))
-    rate=$(echo "scale=1; $success * 100 / $total" | bc 2>/dev/null || echo "0")
-    echo "- **$function_name**: $success/$total (${rate}%)"
-done)
-
-## Test Queries
-
-All test queries are defined in \`scripts/testing/test-queries.json\`
-
-## Logs
-
-Individual test logs: \`$RUN_DIR/test-*.json\`
-EOF
 
     if [ $FAILED_TESTS -eq 0 ]; then
         echo -e "${GREEN}✓ All tests passed!${NC}\n"

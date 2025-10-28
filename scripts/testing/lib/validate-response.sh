@@ -24,17 +24,21 @@ Chatbot Response: "$RESPONSE"
 Output format (nothing else): {"valid": true|false, "reason": "2-4 words"}
 
 Mark as INVALID (valid: false) if response:
-- Says "I don't have", "no data", "can't provide", "unable to"
-- Contains error messages ("went wrong", "error occurred", "failed to")
+- Asks a question back to the user (ends with "?" or asks for clarification)
+- Says "I don't have", "no data", "can't provide", "unable to", "I'm not sure"
+- Contains error messages ("went wrong", "error occurred", "failed to", "Something went wrong")
 - Apologizes without providing data
-- Provides NO actual numbers, figures, or analytics
+- Provides NO actual numbers, figures, percentages, or analytics
+- Says "What category", "What is the comparison", "Can you specify"
+- Is just a deflection or asks user to provide more info
 - Is nonsensical or obviously wrong
 
 Mark as VALID (valid: true) ONLY if response:
-- Contains actual dollar amounts, numbers, percentages
+- Contains actual dollar amounts, numbers, percentages, or specific data
 - Provides specific dates, timeframes, or comparisons
 - Gives concrete analytics data or insights
-- Actually answers the query with DATA
+- Actually answers the query with DATA (not questions)
+- Even "No data found" is OK if it explains WHY or provides context
 PROMPT
 )
 
