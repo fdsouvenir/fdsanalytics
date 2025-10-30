@@ -14,8 +14,8 @@ if [ -z "$QUERY" ] || [ -z "$RESPONSE" ]; then
     exit 1
 fi
 
-# Call Claude CLI for validation (uses 'haiku' alias for latest Haiku model)
-VALIDATION=$(cat <<PROMPT | claude --print --model haiku 2>&1
+# Call Claude CLI for validation (uses Sonnet 4.5 for more robust validation)
+VALIDATION=$(cat <<PROMPT | claude --print --model claude-sonnet-4-5 2>&1
 You are a QA engineer testing an AI-powered restaurant analytics chatbot.
 
 SYSTEM UNDER TEST:
@@ -49,13 +49,14 @@ Chatbot Response: "$RESPONSE"
 Return ONLY valid JSON: {"valid": true|false, "reason": "2-6 words describing issue or success"}
 
 Mark INVALID if the response:
-- Contains data unrelated to the query (e.g., talks about May when asked about July)
-- Includes extraneous information from other topics
-- Asks clarifying questions instead of answering
-- Says "I don't have", "can't provide", "I'm not sure" without context
-- Contains error messages ("went wrong", "Something went wrong")
-- Has NO specific data (no numbers, dates, or analytics)
-- Gives logically impossible results (e.g., weekend sales = \$0.00)
+- **Asks questions back** to the user (e.g., "What category?", "Which month?")
+- **Deflects or promises** without delivering (e.g., "Let me get that for you...")
+- **Logically impossible results** (e.g., weekend sales = \$0.00 for a busy restaurant)
+- **Context bleeding** - includes data unrelated to the query (e.g., talks about May when asked about July, or mentions unrelated items from previous queries)
+- **Generic errors** without explanation (e.g., "No data found" without saying why)
+- **No specific data** - missing numbers, dates, percentages, or concrete analytics
+- **Contains error messages** (e.g., "Something went wrong", "failed to retrieve")
+- **Extraneous information** from conversation history that doesn't apply to current query
 
 Mark VALID if the response:
 - Directly addresses what the user asked

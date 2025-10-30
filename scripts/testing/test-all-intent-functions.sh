@@ -39,7 +39,7 @@ WAIT_TIME=60  # Increased from 30 to allow Cloud Logging propagation
 TEST_FUNCTION=""
 CONTINUOUS_MODE=false
 TEST_FILE="test-queries.json"
-TEST_MODE="contextual"  # isolated|contextual
+TEST_MODE="isolated"  # isolated|contextual (default: isolated to prevent context bleeding)
 
 # Colors
 GREEN='\033[0;32m'
@@ -253,6 +253,7 @@ EOF
         local format_response_ms=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.timings.formatResponse // 0')
         local tool_calls=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.toolCallsCount // 0')
         local chart_generated=$(cat "/tmp/test-${test_id}.json" | jq -r '.[0].jsonPayload.chartGenerated // false')
+        local tool_calls_summary=$(cat "/tmp/test-${test_id}.json" | jq -c '.[0].jsonPayload.toolCallsSummary // []')
 
         # Display response preview
         if [ -n "$response_text" ] && [ "$response_text" != "null" ]; then
@@ -266,6 +267,18 @@ EOF
 > $(echo "$response_text" | sed 's/^/> /g')
 
 EOF
+
+        # Add tool calls summary if available
+        if [ "$tool_calls_summary" != "[]" ] && [ "$tool_calls_summary" != "null" ]; then
+            cat >> "$REPORT_FILE" <<EOF
+**Tool Calls Made ($tool_calls):**
+EOF
+            # Parse and display each tool call
+            echo "$tool_calls_summary" | jq -r '.[] | "- \(.tool) (params: \(.params | join(", ")))"' >> "$REPORT_FILE"
+            cat >> "$REPORT_FILE" <<EOF
+
+EOF
+        fi
 
         # Calculate percentages for timing breakdown
         local resolve_pct=0

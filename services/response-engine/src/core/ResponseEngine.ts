@@ -153,6 +153,10 @@ export class ResponseEngine {
           formatResponse: timings.formatResponse
         },
         toolCallsCount: result.toolCallsMade.length,
+        toolCallsSummary: result.toolCallsMade.map(tc => ({
+          tool: tc.toolName,
+          params: Object.keys(tc.parameters || {})
+        })),
         chartGenerated: result.chartUrl !== null
       }));
 
