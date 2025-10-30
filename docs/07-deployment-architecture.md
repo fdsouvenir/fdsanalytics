@@ -1,7 +1,7 @@
 # Deployment Architecture
 ## Senso Restaurant Analytics - Version 1.0
 
-**Purpose:** Define GCP services, IAM roles, CI/CD pipeline, and environment management.
+**Purpose:** Define GCP services, IAM roles, deployment procedures, and environment management.
 
 ---
 
@@ -23,27 +23,27 @@
                               │  0-10 instances   │
                               └────────┬──────────┘
                                        │
-                    ┌──────────────────┼──────────────────┐
-                    │                  │                  │
-            ┌───────▼────────┐  ┌──────▼──────┐  ┌──────▼──────┐
-            │ Conversation    │  │    BQHandler      │  │   Chart     │
-            │   Manager       │  │   Server    │  │  Builder    │
-            │ (Cloud Run)     │  │ (Cloud Run) │  │  (Library)  │
-            │ 256MB / 0.5 CPU │  │ 256MB / 0.5 │  └─────────────┘
-            └────────┬────────┘  └──────┬──────┘         │
-                     │                  │                │
-                     │                  │                │
-                ┌────▼──────────────────▼────────────────▼────┐
-                │           BigQuery                           │
-                │  ├── restaurant_analytics (raw data)         │
-                │  ├── insights (pre-computed)                 │
-                │  ├── chat_history (conversations)            │
-                │  └── ingestion (logs)                        │
-                └──────────────────────────────────────────────┘
-                
+                    ┌──────────────────┴──────────────────┐
+                    │                                     │
+            ┌───────▼────────┐                   ┌───────▼────────┐
+            │ Conversation    │                   │   Vertex AI    │
+            │   Manager       │                   │  Gemini Flash  │
+            │ (Cloud Run)     │                   │  (GCP managed) │
+            │ 256MB / 0.5 CPU │                   └────────────────┘
+            └────────┬────────┘
+                     │
+                     │
+                ┌────▼──────────────────────────────────────────┐
+                │           BigQuery                            │
+                │  ├── restaurant_analytics (raw data)          │
+                │  ├── insights (pre-computed)                  │
+                │  ├── chat_history (conversations)             │
+                │  └── ingestion (logs)                         │
+                └───────────────────────────────────────────────┘
+
 ┌──────────────────┐         ┌───────────────────┐
 │ Cloud Scheduler  │────────►│ Gmail Ingestion   │
-│ Daily 3am CT     │         │ (Cloud Function)  │
+│ Daily 3am CT     │         │ (Cloud Run)       │
 └──────────────────┘         │ 512MB / 540s      │
                              └─────────┬─────────┘
                                        │
@@ -54,9 +54,11 @@
 
 ┌───────────────────┐         ┌───────────────────┐
 │  Secret Manager   │◄────────┤  All Services     │
-│  - GEMINI_API_KEY │         │  (read secrets)   │
-│  - GMAIL_OAUTH    │         └───────────────────┘
-└───────────────────┘
+│ - GMAIL_OAUTH     │         │  (read secrets)   │
+│  (NOT API keys)   │         └───────────────────┘
+└───────────────────┘         Note: Vertex AI uses
+                              Application Default
+                              Credentials (no keys)
 
 ┌───────────────────┐         ┌───────────────────┐
 │  Cloud Logging    │◄────────┤  All Services     │
@@ -71,12 +73,12 @@
 └───────────────────┘
 ```
 
-**Note on Legacy Services:**
-Two legacy services from earlier implementation phases remain deployed but are not part of the V1.0 architecture:
-- `chatbot` - Original Phase 1 Google Chat integration (superseded by response-engine)
-- `insightsengine` - Phase 3 nightly analytics (still in use for pre-computed insights)
+**V1 Services (3 total):**
+1. **response-engine** - Main orchestrator, handles Google Chat webhooks
+2. **conversation-manager** - Chat history and context (currently disabled for performance)
+3. **gmail-ingestion** - PMIX PDF parsing and BigQuery loading
 
-These services can coexist with the new architecture during migration. Plan to deprecate `chatbot` once `response-engine` is fully validated.
+**Note:** No separate MCP server or BQHandler service. Response Engine directly calls BigQuery stored procedures via AnalyticsToolHandler.
 
 ---
 
@@ -84,9 +86,9 @@ These services can coexist with the new architecture during migration. Plan to d
 
 ### 2.1 Response Engine (Cloud Run)
 
-**Name:** `response-engine`  
-**Image:** `gcr.io/fdsanalytics/response-engine:latest`  
-**Runtime:** Node.js 20  
+**Name:** `response-engine`
+**Image:** `gcr.io/fdsanalytics/response-engine:latest`
+**Runtime:** Node.js 20
 
 **Resources:**
 - CPU: 1
@@ -104,10 +106,11 @@ These services can coexist with the new architecture during migration. Plan to d
 **Service Account:** `response-engine@fdsanalytics.iam.gserviceaccount.com`
 
 **IAM Permissions:**
-- `roles/bigquery.jobUser`
-- `roles/bigquery.dataViewer`
-- `roles/secretmanager.secretAccessor`
-- `roles/logging.logWriter`
+- `roles/bigquery.jobUser` - Run queries and call stored procedures
+- `roles/bigquery.dataViewer` - Read from all datasets
+- `roles/logging.logWriter` - Write structured logs
+- `roles/aiplatform.user` - Call Vertex AI Gemini (via ADC)
+- `roles/run.invoker` on `conversation-manager` - Invoke internal service
 
 **Environment Variables:**
 ```yaml
@@ -115,10 +118,13 @@ PROJECT_ID: fdsanalytics
 REGION: us-central1
 ENVIRONMENT: production
 LOG_LEVEL: info
-GEMINI_SECRET_NAME: GEMINI_API_KEY
-CONVERSATION_MANAGER_URL: https://response-engine-xxxxxxxxxx-uc.a.run.app
 CONVERSATION_MANAGER_URL: https://conversation-manager-xxxxxxxxxx-uc.a.run.app
+BQ_DATASET_ANALYTICS: restaurant_analytics
+BQ_DATASET_INSIGHTS: insights
+BQ_DATASET_CHAT_HISTORY: chat_history
 ```
+
+**Note:** No `GEMINI_SECRET_NAME` or `GEMINI_API_KEY` - Vertex AI uses Application Default Credentials automatically.
 
 **Health Check:**
 - Path: `/health`
@@ -130,7 +136,7 @@ CONVERSATION_MANAGER_URL: https://conversation-manager-xxxxxxxxxx-uc.a.run.app
 **Deploy Command:**
 ```bash
 gcloud run deploy response-engine \
-  --source . \
+  --source ./services/response-engine \
   --region us-central1 \
   --platform managed \
   --service-account response-engine@fdsanalytics.iam.gserviceaccount.com \
@@ -142,50 +148,18 @@ gcloud run deploy response-engine \
   --concurrency 10 \
   --ingress all \
   --allow-unauthenticated \
-  --set-env-vars PROJECT_ID=fdsanalytics,ENVIRONMENT=production \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
+  --set-env-vars PROJECT_ID=fdsanalytics,REGION=us-central1,ENVIRONMENT=production
 ```
 
+**File:** `scripts/deploy/deploy-response-engine.sh`
 
-**Name:** `response-engine`  
-**Image:** `gcr.io/fdsanalytics/response-engine:latest`  
-**Runtime:** Node.js 20  
+---
 
-**Resources:**
-- CPU: 0.5
-- Memory: 256Mi
-- Timeout: 30s
-- Min instances: 0
-- Max instances: 20
+### 2.2 Conversation Manager (Cloud Run)
 
-**Service Account:** `response-engine@fdsanalytics.iam.gserviceaccount.com`
-
-**IAM Permissions:**
-- `roles/bigquery.jobUser`
-- `roles/bigquery.dataViewer`
-- `roles/logging.logWriter`
-
-**Deploy Command:**
-```bash
-gcloud run deploy response-engine \
-  --source ./services/response-engine \
-  --region us-central1 \
-  --service-account response-engine@fdsanalytics.iam.gserviceaccount.com \
-  --memory 256Mi \
-  --cpu 0.5 \
-  --timeout 30s \
-  --min-instances 0 \
-  --max-instances 20 \
-  --ingress internal \
-  --no-allow-unauthenticated \
-  --set-env-vars PROJECT_ID=fdsanalytics
-```
-
-### 2.3 Conversation Manager (Cloud Run)
-
-**Name:** `conversation-manager`  
-**Image:** `gcr.io/fdsanalytics/conversation-manager:latest`  
-**Runtime:** Node.js 20  
+**Name:** `conversation-manager`
+**Image:** `gcr.io/fdsanalytics/conversation-manager:latest`
+**Runtime:** Node.js 20
 
 **Resources:**
 - CPU: 0.5
@@ -197,10 +171,17 @@ gcloud run deploy response-engine \
 **Service Account:** `conversation-manager@fdsanalytics.iam.gserviceaccount.com`
 
 **IAM Permissions:**
-- `roles/bigquery.jobUser`
-- `roles/bigquery.dataEditor` (write to chat_history)
-- `roles/secretmanager.secretAccessor`
-- `roles/logging.logWriter`
+- `roles/bigquery.jobUser` - Query chat history
+- `roles/bigquery.dataEditor` - Write to chat_history dataset
+- `roles/logging.logWriter` - Write structured logs
+- `roles/aiplatform.user` - Call Vertex AI for summarization
+
+**Environment Variables:**
+```yaml
+PROJECT_ID: fdsanalytics
+REGION: us-central1
+BQ_DATASET_CHAT_HISTORY: chat_history
+```
 
 **Deploy Command:**
 ```bash
@@ -213,11 +194,16 @@ gcloud run deploy conversation-manager \
   --timeout 30s \
   --ingress internal \
   --no-allow-unauthenticated \
-  --set-env-vars PROJECT_ID=fdsanalytics \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
+  --set-env-vars PROJECT_ID=fdsanalytics,REGION=us-central1
 ```
 
-### 2.4 Gmail Ingestion (Cloud Run)
+**V1 Status:** Deployed but context extraction **disabled** for performance. Response Engine passes empty context.
+
+**File:** `scripts/deploy/deploy-conversation-manager.sh`
+
+---
+
+### 2.3 Gmail Ingestion (Cloud Run)
 
 **Name:** `gmail-ingestion`
 **Image:** `gcr.io/fdsanalytics/gmail-ingestion:latest`
@@ -230,15 +216,27 @@ gcloud run deploy conversation-manager \
 - Min instances: 0
 - Max instances: 1
 
-**Trigger:** HTTP endpoint (invoked by Cloud Scheduler via Pub/Sub or direct HTTP)
+**Trigger:** HTTP endpoint invoked by Cloud Scheduler (daily at 3am CT)
 
 **Service Account:** `gmail-ingestion@fdsanalytics.iam.gserviceaccount.com`
 
 **IAM Permissions:**
-- `roles/bigquery.jobUser`
-- `roles/bigquery.dataEditor`
-- `roles/secretmanager.secretAccessor`
-- `roles/logging.logWriter`
+- `roles/bigquery.jobUser` - Run queries
+- `roles/bigquery.dataEditor` - Write to restaurant_analytics and ingestion datasets
+- `roles/secretmanager.secretAccessor` - Read Gmail OAuth credentials
+- `roles/logging.logWriter` - Write structured logs
+- `roles/aiplatform.user` - Call Vertex AI for PDF parsing (Gemini 2.5 Flash Lite)
+
+**Environment Variables:**
+```yaml
+PROJECT_ID: fdsanalytics
+REGION: us-central1
+ENVIRONMENT: production
+BQ_DATASET_ANALYTICS: restaurant_analytics
+BQ_DATASET_INGESTION: ingestion
+GMAIL_OAUTH_SECRET_NAME: GMAIL_OAUTH_CREDENTIALS
+GMAIL_SEARCH_QUERY: from:spoton subject:pmix
+```
 
 **Deploy Command:**
 ```bash
@@ -254,8 +252,10 @@ gcloud run deploy gmail-ingestion \
   --ingress internal-and-cloud-load-balancing \
   --no-allow-unauthenticated \
   --set-env-vars PROJECT_ID=fdsanalytics,ENVIRONMENT=production \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,GMAIL_OAUTH_CREDENTIALS=GMAIL_OAUTH_CREDENTIALS:latest
+  --set-secrets GMAIL_OAUTH_CREDENTIALS=GMAIL_OAUTH_CREDENTIALS:latest
 ```
+
+**File:** `scripts/deploy/deploy-gmail-ingestion.sh`
 
 ---
 
@@ -268,9 +268,6 @@ gcloud run deploy gmail-ingestion \
 gcloud iam service-accounts create response-engine \
   --display-name "Response Engine Service Account"
 
-gcloud iam service-accounts create response-engine \
-  --display-name "BigQuery analytics Service Account"
-
 gcloud iam service-accounts create conversation-manager \
   --display-name "Conversation Manager Service Account"
 
@@ -281,7 +278,7 @@ gcloud iam service-accounts create gmail-ingestion \
 ### 3.2 IAM Bindings
 
 ```bash
-# Response Engine
+# Response Engine - BigQuery access
 gcloud projects add-iam-policy-binding fdsanalytics \
   --member="serviceAccount:response-engine@fdsanalytics.iam.gserviceaccount.com" \
   --role="roles/bigquery.jobUser"
@@ -290,184 +287,86 @@ gcloud projects add-iam-policy-binding fdsanalytics \
   --member="serviceAccount:response-engine@fdsanalytics.iam.gserviceaccount.com" \
   --role="roles/bigquery.dataViewer"
 
-gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+# Response Engine - Vertex AI access (for Gemini)
+gcloud projects add-iam-policy-binding fdsanalytics \
   --member="serviceAccount:response-engine@fdsanalytics.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+  --role="roles/aiplatform.user"
 
-# BigQuery analytics (similar bindings)
+# Conversation Manager - BigQuery access
+gcloud projects add-iam-policy-binding fdsanalytics \
+  --member="serviceAccount:conversation-manager@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/bigquery.jobUser"
 
-# Gmail Ingestion (needs dataEditor for writes)
+gcloud projects add-iam-policy-binding fdsanalytics \
+  --member="serviceAccount:conversation-manager@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/bigquery.dataEditor"
+
+# Conversation Manager - Vertex AI access (for summarization)
+gcloud projects add-iam-policy-binding fdsanalytics \
+  --member="serviceAccount:conversation-manager@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+# Gmail Ingestion - BigQuery write access
 gcloud projects add-iam-policy-binding fdsanalytics \
   --member="serviceAccount:gmail-ingestion@fdsanalytics.iam.gserviceaccount.com" \
   --role="roles/bigquery.dataEditor"
+
+# Gmail Ingestion - Vertex AI access (for PDF parsing)
+gcloud projects add-iam-policy-binding fdsanalytics \
+  --member="serviceAccount:gmail-ingestion@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+# Gmail Ingestion - Secret Manager access
+gcloud secrets add-iam-policy-binding GMAIL_OAUTH_CREDENTIALS \
+  --member="serviceAccount:gmail-ingestion@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
 ### 3.3 Service-to-Service Communication
 
 ```bash
-# Allow Response Engine to invoke BigQuery analytics
-gcloud run services add-iam-policy-binding response-engine \
-  --region us-central1 \
-  --member="serviceAccount:response-engine@fdsanalytics.iam.gserviceaccount.com" \
-  --role="roles/run.invoker"
-
 # Allow Response Engine to invoke Conversation Manager
 gcloud run services add-iam-policy-binding conversation-manager \
   --region us-central1 \
   --member="serviceAccount:response-engine@fdsanalytics.iam.gserviceaccount.com" \
   --role="roles/run.invoker"
+
+# Allow Cloud Scheduler to invoke Gmail Ingestion
+gcloud run services add-iam-policy-binding gmail-ingestion \
+  --region us-central1 \
+  --member="serviceAccount:cloud-scheduler@fdsanalytics.iam.gserviceaccount.com" \
+  --role="roles/run.invoker"
 ```
 
 ---
 
-## 4. CI/CD Pipeline
+## 4. Deployment Order
 
-### 4.1 GitHub Actions Workflow
-
-```yaml
-# .github/workflows/deploy.yml
-
-name: Deploy to Production
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-env:
-  PROJECT_ID: fdsanalytics
-  REGION: us-central1
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Run unit tests
-        run: npm run test:unit
-      
-      - name: Run integration tests
-        run: npm run test:integration
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SA_KEY_TEST }}
-      
-      - name: Check coverage
-        run: npm run test:coverage
-
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [response-engine, response-engine, conversation-manager, gmail-ingestion]
-    steps:
-      - uses: actions/checkout@v3
-      
-      - uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-      
-      - uses: google-github-actions/setup-gcloud@v1
-      
-      - name: Build and push Docker image
-        run: |
-          gcloud builds submit \
-            --tag gcr.io/$PROJECT_ID/${{ matrix.service }}:${{ github.sha }} \
-            --tag gcr.io/$PROJECT_ID/${{ matrix.service }}:latest \
-            ./services/${{ matrix.service }}
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-      
-      - uses: google-github-actions/setup-gcloud@v1
-      
-      - name: Deploy Response Engine
-      
-      - name: Deploy BigQuery analytics
-      
-      - name: Deploy Conversation Manager
-        run: ./scripts/deploy-conversation-manager.sh
-      
-      - name: Deploy Gmail Ingestion
-        run: ./scripts/deploy-gmail-ingestion.sh
-      
-      - name: Run smoke tests
-        run: npm run test:smoke
-
-  notify:
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Notify on success
-        if: success()
-        run: |
-          curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
-            -H 'Content-Type: application/json' \
-            -d '{"text":"✅ Deployment successful"}'
-      
-      - name: Notify on failure
-        if: failure()
-        run: |
-          curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
-            -H 'Content-Type: application/json' \
-            -d '{"text":"❌ Deployment failed"}'
-```
-
-### 4.2 Deployment Scripts
+**CRITICAL:** Services must be deployed in this order to resolve dependencies:
 
 ```bash
-#!/bin/bash
+# 1. Deploy Conversation Manager first (no dependencies)
+./scripts/deploy/deploy-conversation-manager.sh
 
-set -e
+# 2. Deploy Response Engine (depends on Conversation Manager URL)
+./scripts/deploy/deploy-response-engine.sh
 
-PROJECT_ID="fdsanalytics"
-REGION="us-central1"
-SERVICE_NAME="response-engine"
-IMAGE="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:latest"
+# 3. Deploy Gmail Ingestion (independent)
+./scripts/deploy/deploy-gmail-ingestion.sh
 
-echo "Deploying ${SERVICE_NAME}..."
+# 4. Deploy BigQuery stored procedures (data layer)
+./scripts/deploy/deploy-stored-procedures.sh
 
-gcloud run deploy ${SERVICE_NAME} \
-  --image ${IMAGE} \
-  --region ${REGION} \
-  --platform managed \
-  --service-account ${SERVICE_NAME}@${PROJECT_ID}.iam.gserviceaccount.com \
-  --memory 512Mi \
-  --cpu 1 \
-  --timeout 60s \
-  --min-instances 0 \
-  --max-instances 10 \
-  --concurrency 10 \
-  --ingress all \
-  --allow-unauthenticated \
-  --set-env-vars PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
-
-echo "✅ Deployment complete"
-
-# Get service URL
-URL=$(gcloud run services describe ${SERVICE_NAME} \
-  --region ${REGION} \
-  --format 'value(status.url)')
-
-echo "Service URL: ${URL}"
+# 5. Verify all services
+./scripts/utilities/health-check-all.sh
 ```
+
+**All-in-one script:**
+```bash
+./scripts/deploy/deploy-all.sh
+```
+
+**File:** `scripts/deploy/deploy-all.sh`
 
 ---
 
@@ -475,32 +374,47 @@ echo "Service URL: ${URL}"
 
 ### 5.1 Development Environment
 
-**Purpose:** Local development and testing  
-**Resources:** Local Docker containers  
-**Data:** Test BigQuery dataset (`fdsanalytics-test`)  
+**Purpose:** Local development and testing
+**Resources:** Local Docker containers
+**Data:** Connects to test BigQuery dataset or local emulator
 
 **Setup:**
 ```bash
+# Authenticate with GCP (for local BigQuery access)
+gcloud auth application-default login
+
 # Start local services
 docker-compose up -d
 
 # Services available at:
 # - Response Engine: http://localhost:3000
-# - BigQuery analytics: http://localhost:3001
 # - Conversation Manager: http://localhost:3002
+# - Gmail Ingestion: http://localhost:3003
+```
+
+**Environment Variables (.env.development):**
+```bash
+PROJECT_ID=fdsanalytics
+REGION=us-central1
+ENVIRONMENT=development
+LOG_LEVEL=debug
+BQ_DATASET_ANALYTICS=restaurant_analytics
+BQ_DATASET_INSIGHTS=insights
+BQ_DATASET_CHAT_HISTORY=chat_history
 ```
 
 ### 5.2 Production Environment
 
-**Purpose:** Live user traffic  
-**Resources:** GCP Cloud Run services  
-**Data:** Production BigQuery dataset (`fdsanalytics`)  
+**Purpose:** Live user traffic
+**Resources:** GCP Cloud Run services
+**Data:** Production BigQuery dataset (`fdsanalytics`)
 
 **Characteristics:**
-- Auto-scaling (0-10+ instances)
+- Auto-scaling (0-10+ instances per service)
 - Monitoring & alerting enabled
 - Log retention: 30 days
 - Backup strategy: Daily BQ snapshots
+- Regional: us-central1 (co-located with Vertex AI and BigQuery)
 
 ---
 
@@ -509,33 +423,41 @@ docker-compose up -d
 ### 6.1 Service Communication
 
 ```
-[External] Google Chat ──HTTPS──> Response Engine (public)
+[External] Google Chat ──HTTPS──> Response Engine (public, unauthenticated)
                                       │
                             ┌─────────┴─────────┐
                             │                   │
-                    HTTPS (internal)    HTTPS (internal)
+                    HTTPS (internal)    HTTPS (regional API)
+                    + IAM auth                  │
                             │                   │
                             ▼                   ▼
-                    BigQuery analytics          Conversation Manager
-                    (internal)              (internal)
+                    Conversation Manager    Vertex AI
+                    (internal, auth)        Gemini 2.5 Flash
                             │                   │
                             └─────────┬─────────┘
                                       │
                                 BigQuery API
+                                  (regional)
                                       │
                                   BigQuery
 ```
 
 **Security:**
-- Response Engine: Public (authenticated via Google Chat)
-- BigQuery analytics: Internal only (requires IAM invoker role)
-- Conversation Manager: Internal only (requires IAM invoker role)
-- Gmail Ingestion: Pub/Sub trigger only
+- **Response Engine:** Public (Google Chat verifies requests via bearer token)
+- **Conversation Manager:** Internal only (requires `roles/run.invoker`)
+- **Gmail Ingestion:** Internal + Cloud Load Balancing (for Cloud Scheduler)
+- **Vertex AI:** Regional endpoint (us-central1), ADC authentication
+- **BigQuery:** Regional API (us-central1), service account authentication
 
 ### 6.2 VPC Configuration
 
-**Current:** Default VPC (sufficient for v1)  
-**Future (Multi-tenant):** VPC Service Controls for data isolation
+**Current:** Default VPC (sufficient for V1)
+**Rationale:** All services in same region (us-central1), low latency (<50ms)
+
+**Future (Multi-tenant V2):**
+- VPC Service Controls for data isolation
+- Private Service Connect for Vertex AI
+- Cloud NAT for egress traffic control
 
 ---
 
@@ -547,7 +469,7 @@ docker-compose up -d
 ```bash
 gcloud logging sinks create bigquery-export \
   bigquery.googleapis.com/projects/fdsanalytics/datasets/logs \
-  --log-filter='resource.type="cloud_run_revision" OR resource.type="cloud_function"'
+  --log-filter='resource.type="cloud_run_revision"'
 ```
 
 **Log Queries:**
@@ -560,35 +482,50 @@ WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
 ORDER BY timestamp DESC;
 
 -- Response time analysis
-SELECT 
+SELECT
   AVG(jsonPayload.durationMs) as avg_duration,
   APPROX_QUANTILES(jsonPayload.durationMs, 100)[OFFSET(95)] as p95_duration
 FROM `fdsanalytics.logs.cloudrun_logs`
 WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
   AND jsonPayload.component = 'response-engine';
+
+-- Function call analysis
+SELECT
+  jsonPayload.metadata.function as intent_function,
+  COUNT(*) as call_count,
+  AVG(jsonPayload.durationMs) as avg_duration
+FROM `fdsanalytics.logs.cloudrun_logs`
+WHERE timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+  AND jsonPayload.message = 'Intent function executed successfully'
+GROUP BY intent_function
+ORDER BY call_count DESC;
 ```
 
 ### 7.2 Cloud Monitoring Dashboards
 
 **Response Engine Dashboard:**
 - Request rate (requests/sec)
-- Error rate (%)
-- P50/P95/P99 latency
+- Error rate (%) - Target: <1%
+- P50/P95/P99 latency - Target: P95 <10s
 - Instance count
-- CPU utilization
-- Memory utilization
+- CPU utilization - Target: <70%
+- Memory utilization - Target: <80%
+- Vertex AI API latency
+- BigQuery query duration
 
 **Gmail Ingestion Dashboard:**
-- PDFs processed per hour
-- Success rate (%)
-- Average processing time
-- Failed ingestions
+- PDFs processed per run
+- Success rate (%) - Target: >95%
+- Average processing time per PDF
+- Failed ingestions (by error type)
+- Gemini API calls for PDF parsing
 
 **BigQuery Dashboard:**
-- Query count
-- Bytes scanned
+- Query count (by stored procedure)
+- Bytes scanned per query
 - Slot utilization
 - Query errors
+- Cache hit rate (insights fast path vs slow path)
 
 ### 7.3 Alerting Policies
 
@@ -600,7 +537,7 @@ gcloud alpha monitoring policies create \
   --condition-display-name="Error rate > 5%" \
   --condition-threshold-value=5 \
   --condition-threshold-duration=300s \
-  --condition-filter='resource.type="cloud_run_revision" 
+  --condition-filter='resource.type="cloud_run_revision"
                       resource.labels.service_name="response-engine"
                       severity="ERROR"'
 
@@ -608,11 +545,23 @@ gcloud alpha monitoring policies create \
 gcloud alpha monitoring policies create \
   --notification-channels=CHANNEL_ID \
   --display-name="Response Engine High Latency" \
-  --condition-display-name="P95 latency > 10s" \
-  --condition-threshold-value=10000 \
+  --condition-display-name="P95 latency > 15s" \
+  --condition-threshold-value=15000 \
   --condition-threshold-duration=300s \
   --condition-filter='resource.type="cloud_run_revision"
+                      resource.labels.service_name="response-engine"
                       metric.type="run.googleapis.com/request_latencies"'
+
+# Gmail Ingestion failures
+gcloud alpha monitoring policies create \
+  --notification-channels=CHANNEL_ID \
+  --display-name="Gmail Ingestion Failures" \
+  --condition-display-name="Failed PDF processing > 3 in 1 hour" \
+  --condition-threshold-value=3 \
+  --condition-threshold-duration=3600s \
+  --condition-filter='resource.type="cloud_run_revision"
+                      resource.labels.service_name="gmail-ingestion"
+                      jsonPayload.message="PDF processing failed"'
 ```
 
 ---
@@ -621,32 +570,30 @@ gcloud alpha monitoring policies create \
 
 ### 8.1 Secret Creation
 
+**Gmail OAuth Credentials:**
 ```bash
-# Create Gemini API key secret
-echo -n "YOUR_API_KEY" | gcloud secrets create GEMINI_API_KEY \
-  --project=fdsanalytics \
-  --replication-policy="automatic" \
-  --data-file=-
-
-# Create Gmail OAuth secret
-echo '{"senso-sushi":{"access_token":"...","refresh_token":"..."}}' | \
+# Create Gmail OAuth secret (per-tenant JSON)
+echo '{"senso-sushi":{"access_token":"...","refresh_token":"...","token_expiry":"..."}}' | \
   gcloud secrets create GMAIL_OAUTH_CREDENTIALS \
   --project=fdsanalytics \
   --replication-policy="automatic" \
   --data-file=-
 ```
 
+**Note:** No Gemini API key secret needed. Vertex AI uses Application Default Credentials automatically.
+
 ### 8.2 Secret Rotation
 
 ```bash
-# Add new version
-echo -n "NEW_API_KEY" | gcloud secrets versions add GEMINI_API_KEY \
+# Add new version of Gmail OAuth (when tokens refreshed)
+echo '{"senso-sushi":{"access_token":"NEW_...","refresh_token":"NEW_..."}}' | \
+  gcloud secrets versions add GMAIL_OAUTH_CREDENTIALS \
   --data-file=-
 
 # Services automatically pick up latest version on restart
 
 # Disable old version after validation
-gcloud secrets versions disable 1 --secret=GEMINI_API_KEY
+gcloud secrets versions disable 1 --secret=GMAIL_OAUTH_CREDENTIALS
 ```
 
 ---
@@ -656,99 +603,172 @@ gcloud secrets versions disable 1 --secret=GEMINI_API_KEY
 ### 9.1 Backup Strategy
 
 **BigQuery:**
-- Automatic 7-day snapshots (built-in)
-- Manual exports to GCS monthly
-- Cross-region replication: Disabled (cost optimization)
+- Automatic 7-day time-travel (built-in)
+- Manual exports to GCS monthly:
+  ```bash
+  bq extract --destination_format=PARQUET \
+    fdsanalytics:restaurant_analytics.reports \
+    gs://fdsanalytics-backups/$(date +%Y%m)/reports/*.parquet
+  ```
+- Cross-region replication: Disabled (cost optimization for V1)
 
 **Secrets:**
-- Export to encrypted file monthly
-- Store in separate GCS bucket
+- Export Gmail OAuth tokens to encrypted file monthly
+- Store in separate GCS bucket with versioning enabled
 
 **Code:**
-- GitHub repository (primary)
-- Mirror to GCS bucket weekly
+- GitHub repository (primary) - commit history preserved
+- Docker images in GCR tagged with git SHA
 
 ### 9.2 Recovery Procedures
 
 **Service Failure:**
 ```bash
-# Rollback to previous version
+# Rollback to previous revision
+PREVIOUS_REVISION=$(gcloud run revisions list \
+  --service response-engine \
+  --region us-central1 \
+  --limit 2 \
+  --format="value(metadata.name)" | tail -1)
+
 gcloud run services update-traffic response-engine \
-  --to-revisions=PREVIOUS_REVISION=100
+  --region us-central1 \
+  --to-revisions=$PREVIOUS_REVISION=100
 ```
 
 **Data Loss:**
 ```bash
-# Restore from snapshot (< 7 days)
+# Restore from time-travel (< 7 days ago)
 bq cp -f \
-  fdsanalytics:restaurant_analytics@-86400000 \
-  fdsanalytics:restaurant_analytics_recovered
+  'fdsanalytics:restaurant_analytics.reports@-86400000' \
+  fdsanalytics:restaurant_analytics.reports_recovered
 
-# Restore from GCS export (> 7 days)
-bq load --source_format=PARQUET \
+# Restore from GCS export (> 7 days ago)
+bq load --source_format=PARQUET --replace \
   fdsanalytics:restaurant_analytics.reports \
-  gs://fdsanalytics-backups/reports/*.parquet
+  gs://fdsanalytics-backups/202510/reports/*.parquet
 ```
 
 ---
 
 ## 10. Cost Optimization
 
-### 10.1 Cost Breakdown (Estimated)
+### 10.1 Cost Breakdown (Estimated Monthly)
 
 | Service | Monthly Cost | Notes |
 |---------|--------------|-------|
-| Cloud Run (Response Engine) | $5-10 | Scale to zero |
-| Cloud Run (BigQuery analytics) | $3-5 | Minimal traffic |
-| Cloud Run (Conversation Manager) | $2-4 | Lightweight |
-| Cloud Function (Ingestion) | $2-3 | Daily runs |
-| BigQuery Storage | $0.50 | <1GB data |
+| Cloud Run (Response Engine) | $5-10 | Scale to zero, ~500 requests/day |
+| Cloud Run (Conversation Manager) | $1-2 | Minimal traffic (context disabled) |
+| Cloud Run (Gmail Ingestion) | $2-3 | Daily runs (540s timeout) |
+| BigQuery Storage | $0.50 | <1GB data (200+ reports) |
 | BigQuery Queries | $5-10 | <100GB scanned/month |
-| Gemini API | $20-40 | Flash + Pro usage |
-| Secret Manager | $0.10 | 2 secrets |
+| BigQuery Insights Cache | $1 | Pre-computed daily summaries |
+| Vertex AI Gemini Flash | $15-25 | ~500 calls/day, thinking mode |
+| Vertex AI Flash Lite | $2-5 | PDF parsing (daily) |
+| Secret Manager | $0.10 | 1 secret (Gmail OAuth) |
 | Cloud Logging | $2-5 | 30-day retention |
-| **Total** | **$40-80/month** | Single tenant |
+| Cloud Monitoring | $1-2 | Dashboards + alerts |
+| **Total** | **$35-65/month** | Single tenant |
 
 ### 10.2 Cost Optimization Strategies
 
+**Implemented:**
 - ✅ Scale to zero (Cloud Run min instances = 0)
-- ✅ Use Gemini Flash for lightweight tasks
-- ✅ Partition BQ tables by date (reduce scan size)
-- ✅ Cache frequently accessed data
-- ✅ Set query timeouts (prevent runaway costs)
-- ✅ Use materialized views for insights
+- ✅ Use Gemini 2.5 Flash (not Pro) - 10x cheaper
+- ✅ Use Gemini 2.5 Flash Lite for PDF parsing - 20x cheaper
+- ✅ Insights cache system (fast path saves 5-7s per query)
+- ✅ Regional co-location (us-central1) - no egress fees
+- ✅ Query timeouts (30s max) - prevent runaway costs
+- ✅ Conversation context disabled - saves 4-6s per query
+- ✅ Charts deferred - saves 2-3s per query
+
+**Future Optimizations:**
+- Consider committed use discounts for BigQuery (if usage grows)
+- Implement query result caching (reduce redundant queries)
+- Add CDN for chart images (when charts re-enabled)
 
 ---
 
 ## 11. Deployment Checklist
 
-### 11.1 Initial Setup
+### 11.1 Initial Setup (One-time)
 
 - [ ] Create GCP project
-- [ ] Enable APIs (Cloud Run, BigQuery, Secret Manager, etc.)
-- [ ] Create service accounts
-- [ ] Grant IAM permissions
-- [ ] Create BigQuery datasets
-- [ ] Create secrets
-- [ ] Deploy services
-- [ ] Configure Cloud Scheduler
+- [ ] Enable APIs:
+  - [ ] Cloud Run API
+  - [ ] BigQuery API
+  - [ ] Secret Manager API
+  - [ ] Cloud Logging API
+  - [ ] Cloud Monitoring API
+  - [ ] Vertex AI API (for Gemini)
+  - [ ] Cloud Scheduler API
+  - [ ] Cloud Build API
+- [ ] Create service accounts (3 total)
+- [ ] Grant IAM permissions (BigQuery, Vertex AI, Cloud Run)
+- [ ] Create BigQuery datasets (4 total)
+- [ ] Deploy BigQuery stored procedures (insights + restaurant_analytics)
+- [ ] Create Gmail OAuth secret
+- [ ] Deploy services in order (conversation-manager → response-engine → gmail-ingestion)
+- [ ] Configure Cloud Scheduler job (daily 3am CT)
 - [ ] Set up monitoring dashboards
 - [ ] Configure alert policies
-- [ ] Test end-to-end flow
+- [ ] Test end-to-end flow (Google Chat → analytics query → response)
 
 ### 11.2 Per Deployment
 
-- [ ] Run tests locally
-- [ ] Commit and push to main branch
-- [ ] CI/CD pipeline runs automatically
-- [ ] Monitor deployment logs
-- [ ] Verify health checks pass
-- [ ] Run smoke tests
-- [ ] Check monitoring dashboards
-- [ ] Review error logs (first 30 minutes)
+**Automated (via scripts):**
+- [ ] Run `./scripts/deploy/deploy-all.sh`
+- [ ] Script validates service account permissions
+- [ ] Script deploys services in correct order
+- [ ] Script verifies health checks pass
+- [ ] Script outputs service URLs
+
+**Manual Verification:**
+- [ ] Check deployment logs for errors
+- [ ] Test Google Chat integration (send test query)
+- [ ] Review Cloud Monitoring dashboards (first 30 minutes)
+- [ ] Check error logs in Cloud Logging
+- [ ] Verify BigQuery query costs (check bytes scanned)
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** October 22, 2025  
-**Dependencies:** All previous documents
+## 12. Regional Architecture
+
+**All services co-located in `us-central1` for optimal performance:**
+
+```
+┌─────────────────────────────────────────┐
+│         us-central1 Region              │
+├─────────────────────────────────────────┤
+│  Cloud Run Services                     │
+│  ├── response-engine                    │
+│  ├── conversation-manager               │
+│  └── gmail-ingestion                    │
+│                                         │
+│  Vertex AI                              │
+│  └── Gemini 2.5 Flash endpoint          │
+│                                         │
+│  BigQuery                               │
+│  ├── restaurant_analytics dataset       │
+│  ├── insights dataset                   │
+│  ├── chat_history dataset               │
+│  └── ingestion dataset                  │
+└─────────────────────────────────────────┘
+```
+
+**Benefits:**
+- <50ms latency between services
+- No cross-region egress fees
+- Single region simplifies compliance
+
+**Trade-offs:**
+- No multi-region redundancy (acceptable for V1)
+- Single point of failure (us-central1 outage affects all services)
+
+---
+
+**Document Version:** 1.0
+**Last Updated:** October 30, 2025
+**Dependencies:**
+- 02-api-contracts.md (service interfaces)
+- 09-gemini-integration.md (Vertex AI details)

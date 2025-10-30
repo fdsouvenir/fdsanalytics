@@ -125,7 +125,7 @@ export class ResponseGenerator {
         }, null, 2));
 
         return await this.analyticsToolHandler.execute(functionName, functionArgs);
-      }, 'gemini-2.5-flash-lite');  // Use flash-lite for both steps
+      }, 'gemini-2.5-flash');  // Use flash for better reasoning
 
       const totalGeminiDuration = Date.now() - step2Start;
 
@@ -544,6 +544,24 @@ IMPORTANT:
    * Format error response for user
    */
   private formatErrorResponse(error: any): string {
+    // CRITICAL: Always log full error details for debugging
+    // This helps diagnose issues that are hidden by user-friendly messages
+    console.error(JSON.stringify({
+      severity: 'ERROR',
+      message: 'Error in ResponseGenerator.generate()',
+      errorType: error.constructor?.name || 'Unknown',
+      errorMessage: error.message || String(error),
+      errorCode: error.code,
+      errorDetails: {
+        name: error.name,
+        stack: error.stack,
+        cause: error.cause,
+        // Include any custom properties
+        ...error
+      }
+    }));
+
+    // Return user-friendly messages based on error type
     if (error.message?.includes('Invalid primary_category')) {
       return 'I couldn\'t find that category. Please check the spelling or ask me to list available categories.';
     }

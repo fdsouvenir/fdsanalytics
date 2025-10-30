@@ -60,7 +60,8 @@ enum TransientError {
   SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
   BQ_STREAMING_BUFFER = 'BQ_STREAMING_BUFFER',
-  GEMINI_QUOTA_EXCEEDED = 'GEMINI_QUOTA_EXCEEDED'
+  VERTEX_AI_QUOTA_EXCEEDED = 'VERTEX_AI_QUOTA_EXCEEDED',
+  VERTEX_AI_RATE_LIMIT = 'VERTEX_AI_RATE_LIMIT'
 }
 ```
 
@@ -237,7 +238,8 @@ async function retryWithBackoff<T>(
 | Error Type | Retry? | Max Attempts | Initial Delay | Max Delay |
 |------------|--------|--------------|---------------|-----------|
 | BQ timeout | ✅ Yes | 3 | 1s | 10s |
-| Gemini rate limit | ✅ Yes | 5 | 2s | 30s |
+| Vertex AI rate limit | ✅ Yes | 5 | 10s | 30s |
+| Vertex AI quota | ✅ Yes | 3 | 10s | 30s |
 | Chart generation | ❌ No | 1 | - | - |
 | Network timeout | ✅ Yes | 3 | 1s | 10s |
 | Invalid input | ❌ No | 1 | - | - |
@@ -525,22 +527,29 @@ try {
 }
 ```
 
-### 7.3 Gemini API Failures
+### 7.3 Vertex AI Gemini Failures
 
-**Scenario:** Rate limit exceeded
+**Scenario:** Rate limit or quota exceeded
 
 ```typescript
 try {
-  return await gemini.generateResponse(prompt);
+  return await geminiClient.generateWithFunctionCalling(input, executeFunction);
 } catch (error) {
   if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
+    console.warn('Vertex AI rate limit hit, waiting and retrying...');
     // Wait and retry with longer delay
     await sleep(10000);
-    return await gemini.generateResponse(prompt);
+    return await geminiClient.generateWithFunctionCalling(input, executeFunction);
   }
-  throw error;
+  throw new Error(`Vertex AI error: ${error.message}`);
 }
 ```
+
+**Common Vertex AI Errors:**
+- Rate limit exceeded - Retry after 10 seconds
+- Quota exceeded - Retry with exponential backoff
+- Invalid model name - Configuration error, fail fast
+- ADC credentials missing - Configuration error, fail fast
 
 ---
 
@@ -617,7 +626,7 @@ async function generateChart(spec: ChartSpec): Promise<string | null> {
 ### 8.2 Circuit Breaker Use Cases
 
 - **Chart generation** - Fails fast after 5 consecutive failures
-- **Gemini API** - Opens circuit if quota consistently exceeded
+- **Vertex AI Gemini API** - Opens circuit if quota consistently exceeded
 - **Gmail API** - Opens circuit during extended outages
 
 ---

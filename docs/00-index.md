@@ -5,7 +5,7 @@
 **Customer:** Senso Sushi (Frankfort) - Single Tenant  
 **Platform:** Google Chat Workspace Addon  
 **GCP Project:** fdsanalytics  
-**Documentation Date:** October 22, 2025  
+**Documentation Date:** October 30, 2025  
 
 ---
 
@@ -32,18 +32,19 @@ This directory contains complete specifications for rebuilding the restaurant an
 ---
 
 ### 2. [API Contracts & Interfaces](./02-api-contracts.md)
-**Purpose:** Define all component interfaces  
+**Purpose:** Define all component interfaces
 **Contains:**
 - Response Engine public API
-- BigQuery analytics protocol
+- Intent Functions interface (8 functions)
 - BigQuery stored procedure signatures
-- Chart Builder interface
+- Vertex AI Gemini API integration
 - Error response standards
 - Logging standards
 
 **Key Takeaways:**
-- Contract-driven development
-- All interfaces use TypeScript for type safety
+- Intent-driven function calling with Gemini
+- 8 intent functions for analytics queries
+- Vertex AI with ADC authentication
 - Standard error response format
 - Structured JSON logging
 
@@ -60,6 +61,7 @@ This directory contains complete specifications for rebuilding the restaurant an
 
 **Key Takeaways:**
 - Existing `restaurant_analytics` and `insights` datasets
+- Hybrid cache system (fast path vs slow path)
 - New `ingestion` dataset for tracking
 - MERGE upsert pattern for idempotency
 - Avoid Cartesian products in aggregations
@@ -77,8 +79,8 @@ This directory contains complete specifications for rebuilding the restaurant an
 - Cloud Scheduler setup
 
 **Key Takeaways:**
-- Secrets in Google Secret Manager
-- Service account per component
+- Vertex AI uses Application Default Credentials (no API key)
+- Service account per component with `roles/aiplatform.user`
 - Environment-based configuration
 - Feature flags for gradual rollout
 
@@ -102,19 +104,20 @@ This directory contains complete specifications for rebuilding the restaurant an
 ---
 
 ### 6. [Testing Strategy](./06-testing-strategy.md)
-**Purpose:** Test approach and coverage goals  
+**Purpose:** Test approach and coverage goals
 **Contains:**
-- Unit, integration, and E2E test scenarios
-- Mock data and test fixtures
-- Performance benchmarks
-- CI/CD integration
-- Coverage requirements (80%+)
+- Production testing with bash harness
+- 38 test queries across 8 intent functions
+- Claude CLI-powered validation
+- Test modes: isolated vs contextual
+- Response validation criteria
 
 **Key Takeaways:**
-- 70% unit tests, 25% integration, 5% E2E
-- Test BigQuery dataset for integration tests
-- Comprehensive mocking strategy
-- Automated testing in CI/CD pipeline
+- Bash-based test harness sends real webhooks to Cloud Run
+- Claude CLI validates responses semantically
+- 93.3% success rate (28/30 tests passing)
+- Tests actual production endpoints, not mocks
+- Flat JSON format for test queries
 
 ---
 
@@ -128,16 +131,17 @@ This directory contains complete specifications for rebuilding the restaurant an
 - Disaster recovery procedures
 
 **Key Takeaways:**
-- Cloud Run for stateless services
+- 3 Cloud Run services (no MCP server/BQHandler)
+- Vertex AI Gemini in us-central1 region
 - Cloud Function for Gmail ingestion
-- Automated deployment via GitHub Actions
+- Automated deployment scripts
 - Scale-to-zero for cost optimization
-- Estimated cost: $40-80/month
+- Estimated cost: <$75/month
 
 ---
 
 ### 8. [Project Structure](./08-project-structure.md)
-**Purpose:** Code organization and file layout  
+**Purpose:** Code organization and file layout
 **Contains:**
 - Directory structure
 - Service-by-service breakdown
@@ -147,10 +151,47 @@ This directory contains complete specifications for rebuilding the restaurant an
 
 **Key Takeaways:**
 - Monorepo with workspaces
-- Services in `services/` directory
+- 3 services: response-engine, conversation-manager, gmail-ingestion
 - Shared code in `shared/` directory
 - TypeScript throughout
 - Path aliases for imports
+
+---
+
+### 9. [Gemini Integration with Vertex AI](./09-gemini-integration.md)
+**Purpose:** Vertex AI implementation details
+**Contains:**
+- Vertex AI setup and authentication
+- Model selection (gemini-2.5-flash)
+- Hybrid stateless-then-stateful function calling
+- Thinking mode implementation
+- Conversation history management
+- Error handling and retry logic
+
+**Key Takeaways:**
+- Uses Vertex AI SDK (@google-cloud/vertexai), not Generative AI SDK
+- Application Default Credentials - no API key management
+- Hybrid approach: mode:ANY for function call, mode:AUTO for response
+- Thinking mode with 1024 token budget
+- Regional endpoint in us-central1
+
+---
+
+### 10. [Intent Functions Reference](./10-intent-functions.md)
+**Purpose:** Complete intent function catalog
+**Contains:**
+- All 8 intent function definitions
+- Parameter schemas and validation
+- Hybrid cache system (fast/slow path)
+- Example queries and responses
+- Implementation details for each function
+
+**Key Takeaways:**
+- 8 functions: show_daily_sales, show_top_items, show_category_breakdown, get_total_sales, find_peak_day, compare_day_types, track_item_performance, compare_periods
+- Hybrid cache: insights dataset (fast) vs query_metrics (slow)
+- Coverage checking via sp_check_insights_coverage
+- Category parsing with primary/subcategory split
+- Date parsing with business timezone awareness
 
 ---
 
@@ -172,21 +213,21 @@ This directory contains complete specifications for rebuilding the restaurant an
        │      (Cloud Run)              │
        └───────┬───────────────┬───────┘
                │               │
-       ┌───────▼─────┐   ┌────▼────────┐
-       │ Conversation│   │ BigQuery analytics  │
-       │  Manager    │   │ (Cloud Run) │
-       │ (Cloud Run) │   └────┬────────┘
+       ┌───────▼─────┐   ┌────▼────────────────┐
+       │ Conversation│   │ AnalyticsToolHandler│
+       │  Manager    │   │ (Intent Functions)  │
+       │ (Cloud Run) │   └────┬────────────────┘
        └──────┬──────┘        │
-              │               │
+              │               │ (via stored procedures)
               └───────┬───────┘
                       ▼
-              ┌───────────────┐
-              │   BigQuery    │
-              │   - sales/    │
-              │   - insights/ │
-              │   - chat/     │
-              │   - ingestion/│
-              └───────────────┘
+              ┌───────────────────────┐
+              │   BigQuery            │
+              │   - restaurant_analytics │
+              │   - insights (cache)     │
+              │   - chat_history         │
+              │   - ingestion            │
+              └───────────────────────┘
 
 ┌──────────────────┐         ┌──────────────┐
 │ Cloud Scheduler  │────────►│ Gmail        │
@@ -204,18 +245,18 @@ This directory contains complete specifications for rebuilding the restaurant an
 ## 🎯 Key Design Decisions
 
 ### 1. Security: BigQuery Stored Procedures
-**Problem:** Prevent SQL injection  
-**Solution:** Direct BigQuery validates parameters → BigQuery stored procedures build queries safely  
+**Problem:** Prevent SQL injection
+**Solution:** AnalyticsToolHandler validates parameters → BigQuery stored procedures build queries safely
 **Benefit:** Injection-proof by design
 
-### 2. Architecture: Separation of Concerns
+### 2. Architecture: Intent-Driven Function Calling
 **Components:**
-- Response Engine: Orchestration
-- Conversation Manager: History + context
-- BigQuery analytics: Data access
-- Chart Builder: Visualization
+- Response Engine: Orchestration with Vertex AI Gemini
+- 8 Intent Functions: Specific analytics operations
+- Conversation Manager: History + context (disabled in V1 for performance)
+- Hybrid Cache: Fast path (insights) vs slow path (query_metrics)
 
-**Benefit:** Each component has single responsibility, easy to test
+**Benefit:** Gemini chooses appropriate function, guaranteed execution, natural responses
 
 ### 3. Ingestion: Gmail + MERGE Pattern
 **Problem:** SpotOn API not available yet  
@@ -339,8 +380,9 @@ npm run test:smoke
 - **Monitoring:** Cloud Logging, Cloud Monitoring
 
 ### AI/ML
-- **Gemini Flash:** Conversation management, PDF parsing
-- **Gemini Pro:** Response generation with function calling
+- **Vertex AI Gemini 2.5 Flash:** Function calling, response generation, PDF parsing
+- **Hybrid stateless-then-stateful approach:** Guarantees function execution + natural responses
+- **Thinking mode:** 1024 token budget for reasoning
 
 ### External APIs
 - **Google Chat API:** Workspace addon
@@ -348,10 +390,10 @@ npm run test:smoke
 - **quickchart.io:** Chart generation
 
 ### Development
-- **Testing:** Jest
+- **Testing:** Bash harness + Claude CLI validation
 - **Linting:** ESLint
 - **Type Checking:** TypeScript
-- **CI/CD:** GitHub Actions
+- **Deployment:** Automated scripts
 
 ---
 
@@ -437,8 +479,8 @@ npm run test:smoke
 ## 📝 Document Maintenance
 
 **Review Schedule:** Quarterly  
-**Last Updated:** October 22, 2025  
-**Next Review:** January 22, 2026  
+**Last Updated:** October 30, 2025
+**Next Review:** January 30, 2026  
 
 **Update Process:**
 1. Make changes to relevant document
@@ -458,10 +500,10 @@ You now have complete specifications to:
 5. Monitor and maintain
 
 **Next Steps:**
-1. Read documents 1-8 in order
-2. Review PROJECT_INFO.md for current setup
-3. Start with Phase 1 of implementation checklist
-4. Build incrementally with tests
+1. Read documents 1-10 in order (especially 09-gemini-integration.md and 10-intent-functions.md)
+2. Review CLAUDE.md for current setup
+3. Understand Vertex AI hybrid function calling approach
+4. Review test harness in scripts/testing/
 
 **Questions?** Refer to specific documents for detailed information on each topic.
 

@@ -1,0 +1,88 @@
+{
+  "description": "Isolated test queries - no conversation history (38 tests)",
+  "intentFunctions": {
+    "compare_day_types": {
+      "description": "Tests for compare_day_types",
+      "queries": [
+        "weekdays vs weekends in July 2025",
+        "Saturday and Sunday sales in July 2025",
+        "weekend sales in July 2025",
+        "weekday sales in July 2025",
+        "Fridays vs Saturdays in July 2025"
+      ]
+    },
+    "compare_periods": {
+      "description": "Tests for compare_periods",
+      "queries": [
+        "compare May and June 2025 sales",
+        "compare weekdays in May vs June 2025"
+      ]
+    },
+    "find_peak_day": {
+      "description": "Tests for find_peak_day",
+      "queries": [
+        "best sales day in July 2025",
+        "best and worst day in July 2025"
+      ]
+    },
+    "general": {
+      "description": "Tests for general",
+      "queries": [
+        "what's the weather today",
+        "how many customers visited last week",
+        "who worked on July 4th",
+        "show me reservations for tonight",
+        "what's on the menu",
+        "compare sales and customer satisfaction",
+        "tell me a joke"
+      ]
+    },
+    "get_total_sales": {
+      "description": "Tests for get_total_sales",
+      "queries": [
+        "total sales in June 2025",
+        "sales next month",
+        "beer sales in December 2024",
+        "sales on July 4, 2025",
+        "July 4th sales",
+        "total sales May 2025"
+      ]
+    },
+    "show_category_breakdown": {
+      "description": "Tests for show_category_breakdown",
+      "queries": [
+        "sales by category in July 2025",
+        "category breakdown May 2025",
+        "BEER vs beer vs (Beer) sales"
+      ]
+    },
+    "show_daily_sales": {
+      "description": "Tests for show_daily_sales",
+      "queries": [
+        "daily sales in May 2025",
+        "sales on February 30, 2025",
+        "sales from May 31 to June 1, 2025",
+        "sales from January to October 2025",
+        "first week of June 2025 sales",
+        "show me sales for the past 7 days"
+      ]
+    },
+    "show_top_items": {
+      "description": "Tests for show_top_items",
+      "queries": [
+        "top 10 items last month",
+        "top 1 item in May 2025",
+        "top 1000 items in May 2025",
+        "top 0 items",
+        "top -5 items"
+      ]
+    },
+    "track_item_performance": {
+      "description": "Tests for track_item_performance",
+      "queries": [
+        "Salmon Roll performance in May 2025",
+        "Dragon Roll (Spicy) sales in May 2025"
+      ]
+    }
+  }
+}

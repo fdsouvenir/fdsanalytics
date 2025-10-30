@@ -1,0 +1,52 @@
+{
+  "description": "Contextual test queries - with conversation history (17 tests)",
+  "intentFunctions": {
+    "flow1_general_to_specific": {
+      "description": "Test narrowing from general to specific (3 queries)",
+      "queries": [
+        "What were May 2025 sales?",
+        "How about just beer?",
+        "And specifically Sapporo?"
+      ]
+    },
+    "flow2_time_progression": {
+      "description": "Test time period carryover and comparison (3 queries)",
+      "queries": [
+        "Show me June 2025 sales",
+        "And what about July?",
+        "Compare those two months"
+      ]
+    },
+    "flow3_best_day_drill_down": {
+      "description": "Test drilling into best day details (3 queries)",
+      "queries": [
+        "What was our best day in July 2025?",
+        "What categories sold well that day?",
+        "Show me the top items that day"
+      ]
+    },
+    "flow4_category_deep_dive": {
+      "description": "Test category exploration with context (3 queries)",
+      "queries": [
+        "Show me category breakdown for July 2025",
+        "Tell me more about sushi performance",
+        "Which sushi items were most popular?"
+      ]
+    },
+    "followup_flows": {
+      "description": "Follow-up query tests with pronoun resolution",
+      "queries": [
+        "compare May and June 2025",
+        "which one was better for sushi?",
+        "show top 5 items in May 2025",
+        "how did they perform in June?",
+        "what was the best day in July 2025",
+        "what about the worst day?",
+        "weekday vs weekend in July 2025",
+        "break it down by specific days of the week",
+        "Salmon Roll sales in May 2025",
+        "compare that to June"
+      ]
+    }
+  }
+}

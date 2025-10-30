@@ -1,0 +1,272 @@
+{
+  "description": "Isolated test queries - no conversation history (38 tests)",
+  "testMode": "isolated",
+  "clearHistoryBetweenTests": true,
+  "sections": {
+    "baseline": {
+      "description": "One straightforward test per intent function (8 tests)",
+      "tests": [
+        {
+          "id": "baseline-01",
+          "function": "show_daily_sales",
+          "query": "daily sales in May 2025",
+          "expectedBehavior": "Should return day-by-day sales breakdown for May 2025"
+        },
+        {
+          "id": "baseline-02",
+          "function": "show_top_items",
+          "query": "top 10 items last month",
+          "expectedBehavior": "Should return top 10 items for September 2025 (current month)"
+        },
+        {
+          "id": "baseline-03",
+          "function": "show_category_breakdown",
+          "query": "sales by category in July 2025",
+          "expectedBehavior": "Should return breakdown by primary categories (Beer, Sushi, Food, etc)"
+        },
+        {
+          "id": "baseline-04",
+          "function": "get_total_sales",
+          "query": "total sales in June 2025",
+          "expectedBehavior": "Should return single total sales number for June 2025"
+        },
+        {
+          "id": "baseline-05",
+          "function": "find_peak_day",
+          "query": "best sales day in July 2025",
+          "expectedBehavior": "Should return single day with highest sales in July"
+        },
+        {
+          "id": "baseline-06",
+          "function": "compare_day_types",
+          "query": "weekdays vs weekends in July 2025",
+          "expectedBehavior": "Should compare weekday vs weekend sales with totals"
+        },
+        {
+          "id": "baseline-07",
+          "function": "track_item_performance",
+          "query": "Salmon Roll performance in May 2025",
+          "expectedBehavior": "Should track Salmon Roll sales over time in May"
+        },
+        {
+          "id": "baseline-08",
+          "function": "compare_periods",
+          "query": "compare May and June 2025 sales",
+          "expectedBehavior": "Should compare total sales between two months"
+        }
+      ]
+    },
+    "edgeCases": {
+      "description": "Edge cases, invalid inputs, boundary conditions (10 tests)",
+      "tests": [
+        {
+          "id": "edge-01",
+          "function": "get_total_sales",
+          "query": "sales next month",
+          "expectedBehavior": "Should explain data only available through October 2025"
+        },
+        {
+          "id": "edge-02",
+          "function": "show_daily_sales",
+          "query": "sales on February 30, 2025",
+          "expectedBehavior": "Should handle invalid date gracefully"
+        },
+        {
+          "id": "edge-03",
+          "function": "get_total_sales",
+          "query": "beer sales in December 2024",
+          "expectedBehavior": "Should explain no data available for that period"
+        },
+        {
+          "id": "edge-04",
+          "function": "show_daily_sales",
+          "query": "sales from May 31 to June 1, 2025",
+          "expectedBehavior": "Should handle month boundary correctly (2 days)"
+        },
+        {
+          "id": "edge-05",
+          "function": "get_total_sales",
+          "query": "sales on July 4, 2025",
+          "expectedBehavior": "Should return single day total"
+        },
+        {
+          "id": "edge-06",
+          "function": "show_daily_sales",
+          "query": "sales from January to October 2025",
+          "expectedBehavior": "Should handle long date range (10 months)"
+        },
+        {
+          "id": "edge-07",
+          "function": "show_daily_sales",
+          "query": "first week of June 2025 sales",
+          "expectedBehavior": "Should interpret and show June 1-7"
+        },
+        {
+          "id": "edge-08",
+          "function": "compare_day_types",
+          "query": "Saturday and Sunday sales in July 2025",
+          "expectedBehavior": "Should compare two specific weekend days"
+        },
+        {
+          "id": "edge-09",
+          "function": "get_total_sales",
+          "query": "July 4th sales",
+          "expectedBehavior": "Should recognize holiday and return July 4, 2025 sales"
+        },
+        {
+          "id": "edge-10",
+          "function": "show_daily_sales",
+          "query": "show me sales for the past 7 days",
+          "expectedBehavior": "Should calculate relative date range from October 2025"
+        }
+      ]
+    },
+    "sanityChecks": {
+      "description": "Tests with known expected value ranges to catch logic bugs (8 tests)",
+      "tests": [
+        {
+          "id": "sanity-01",
+          "function": "compare_day_types",
+          "query": "weekend sales in July 2025",
+          "expectedBehavior": "Weekend sales should be > $0 (validates weekend bug fix)"
+        },
+        {
+          "id": "sanity-02",
+          "function": "compare_day_types",
+          "query": "weekday sales in July 2025",
+          "expectedBehavior": "Weekday sales should be > $0"
+        },
+        {
+          "id": "sanity-03",
+          "function": "compare_day_types",
+          "query": "Fridays vs Saturdays in July 2025",
+          "expectedBehavior": "Both Fridays and Saturdays should have sales > $0"
+        },
+        {
+          "id": "sanity-04",
+          "function": "find_peak_day",
+          "query": "best and worst day in July 2025",
+          "expectedBehavior": "Best day sales should be > worst day sales"
+        },
+        {
+          "id": "sanity-05",
+          "function": "get_total_sales",
+          "query": "total sales May 2025",
+          "expectedBehavior": "May total should be > $0 and match known reports (~$140k)"
+        },
+        {
+          "id": "sanity-06",
+          "function": "show_category_breakdown",
+          "query": "category breakdown May 2025",
+          "expectedBehavior": "Sum of categories should approximately equal total sales"
+        },
+        {
+          "id": "sanity-07",
+          "function": "show_top_items",
+          "query": "top 1 item in May 2025",
+          "expectedBehavior": "Top 1 item should have highest sales"
+        },
+        {
+          "id": "sanity-08",
+          "function": "compare_periods",
+          "query": "compare weekdays in May vs June 2025",
+          "expectedBehavior": "Both periods should have data and valid comparison"
+        }
+      ]
+    },
+    "negativeTests": {
+      "description": "Off-topic or unavailable data queries (7 tests)",
+      "tests": [
+        {
+          "id": "negative-01",
+          "function": null,
+          "query": "what's the weather today",
+          "expectedBehavior": "Should politely decline, not an analytics query"
+        },
+        {
+          "id": "negative-02",
+          "function": null,
+          "query": "how many customers visited last week",
+          "expectedBehavior": "Should explain no customer count data available"
+        },
+        {
+          "id": "negative-03",
+          "function": null,
+          "query": "who worked on July 4th",
+          "expectedBehavior": "Should explain no employee/staffing data"
+        },
+        {
+          "id": "negative-04",
+          "function": null,
+          "query": "show me reservations for tonight",
+          "expectedBehavior": "Should explain no reservation data"
+        },
+        {
+          "id": "negative-05",
+          "function": null,
+          "query": "what's on the menu",
+          "expectedBehavior": "Should explain only sales analytics available"
+        },
+        {
+          "id": "negative-06",
+          "function": null,
+          "query": "compare sales and customer satisfaction",
+          "expectedBehavior": "Should provide sales but explain no satisfaction data"
+        },
+        {
+          "id": "negative-07",
+          "function": null,
+          "query": "tell me a joke",
+          "expectedBehavior": "Should politely decline and offer analytics help"
+        }
+      ]
+    },
+    "boundaryTests": {
+      "description": "Parameter boundary and special character tests (5 tests)",
+      "tests": [
+        {
+          "id": "boundary-01",
+          "function": "show_top_items",
+          "query": "top 1000 items in May 2025",
+          "expectedBehavior": "Should handle large N, return all available items"
+        },
+        {
+          "id": "boundary-02",
+          "function": "show_top_items",
+          "query": "top 0 items",
+          "expectedBehavior": "Should handle gracefully, ask for valid number"
+        },
+        {
+          "id": "boundary-03",
+          "function": "show_top_items",
+          "query": "top -5 items",
+          "expectedBehavior": "Should handle negative N gracefully"
+        },
+        {
+          "id": "boundary-04",
+          "function": "track_item_performance",
+          "query": "Dragon Roll (Spicy) sales in May 2025",
+          "expectedBehavior": "Should handle parentheses in item names"
+        },
+        {
+          "id": "boundary-05",
+          "function": "show_category_breakdown",
+          "query": "BEER vs beer vs (Beer) sales",
+          "expectedBehavior": "Should normalize to (Beer) category correctly"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "totalTests": 38,
+    "sections": {
+      "baseline": 8,
+      "edgeCases": 10,
+      "sanityChecks": 8,
+      "negativeTests": 7,
+      "boundaryTests": 5
+    },
+    "generatedDate": "2025-10-29",
+    "purpose": "Comprehensive isolated testing with no conversation history to validate function accuracy"
+  }
+}

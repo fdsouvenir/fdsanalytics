@@ -1,0 +1,156 @@
+{
+  "description": "Contextual test queries - with conversation history (17 tests)",
+  "testMode": "contextual",
+  "clearHistoryBetweenTests": false,
+  "shareConversationThread": true,
+  "conversationFlows": {
+    "flow1_general_to_specific": {
+      "description": "Test narrowing from general to specific (3 queries)",
+      "queries": [
+        {
+          "id": "context-01",
+          "query": "What were May 2025 sales?",
+          "expectedBehavior": "Should return total sales for May 2025",
+          "setsContext": ["time_period: May 2025", "metric: sales"]
+        },
+        {
+          "id": "context-02",
+          "query": "How about just beer?",
+          "expectedBehavior": "Should understand 'beer' refers to May 2025 beer sales",
+          "usesContext": ["time_period: May 2025"],
+          "setsContext": ["category: (Beer)"]
+        },
+        {
+          "id": "context-03",
+          "query": "And specifically Sapporo?",
+          "expectedBehavior": "Should track Sapporo sales in May 2025, filtered to beer category",
+          "usesContext": ["time_period: May 2025", "category: (Beer)"]
+        }
+      ]
+    },
+    "flow2_time_progression": {
+      "description": "Test time period carryover and comparison (3 queries)",
+      "queries": [
+        {
+          "id": "context-04",
+          "query": "Show me June 2025 sales",
+          "expectedBehavior": "Should return total June 2025 sales",
+          "setsContext": ["time_period: June 2025"]
+        },
+        {
+          "id": "context-05",
+          "query": "And what about July?",
+          "expectedBehavior": "Should understand 'July' means July 2025, same year context",
+          "usesContext": ["year: 2025"],
+          "setsContext": ["time_period: July 2025"]
+        },
+        {
+          "id": "context-06",
+          "query": "Compare those two months",
+          "expectedBehavior": "Should compare June vs July 2025 from conversation history",
+          "usesContext": ["time_period: June 2025", "time_period: July 2025"]
+        }
+      ]
+    },
+    "flow3_best_day_drill_down": {
+      "description": "Test drilling into best day details (3 queries)",
+      "queries": [
+        {
+          "id": "context-07",
+          "query": "What was our best day in July 2025?",
+          "expectedBehavior": "Should return highest sales day in July",
+          "setsContext": ["best_day: July 18, 2025", "time_period: July 2025"]
+        },
+        {
+          "id": "context-08",
+          "query": "What categories sold well that day?",
+          "expectedBehavior": "Should show category breakdown for July 18, 2025",
+          "usesContext": ["best_day: July 18, 2025"]
+        },
+        {
+          "id": "context-09",
+          "query": "Show me the top items that day",
+          "expectedBehavior": "Should show top items for July 18, 2025",
+          "usesContext": ["best_day: July 18, 2025"]
+        }
+      ]
+    },
+    "flow4_category_deep_dive": {
+      "description": "Test category exploration with context (3 queries)",
+      "queries": [
+        {
+          "id": "context-10",
+          "query": "Show me category breakdown for July 2025",
+          "expectedBehavior": "Should return all categories for July",
+          "setsContext": ["time_period: July 2025", "categories: all"]
+        },
+        {
+          "id": "context-11",
+          "query": "Tell me more about sushi performance",
+          "expectedBehavior": "Should focus on (Sushi) category in July 2025",
+          "usesContext": ["time_period: July 2025"],
+          "setsContext": ["category: (Sushi)"]
+        },
+        {
+          "id": "context-12",
+          "query": "Which sushi items were most popular?",
+          "expectedBehavior": "Should show top sushi items in July 2025",
+          "usesContext": ["time_period: July 2025", "category: (Sushi)"]
+        }
+      ]
+    }
+  },
+  "followUpTests": {
+    "description": "Simple follow-up queries with pronouns/references (5 tests)",
+    "queries": [
+      {
+        "id": "followup-01",
+        "setupQuery": "compare May and June 2025",
+        "followupQuery": "which one was better for sushi?",
+        "expectedBehavior": "Should compare sushi sales between May and June 2025",
+        "usesContext": ["time_period: May 2025", "time_period: June 2025"]
+      },
+      {
+        "id": "followup-02",
+        "setupQuery": "show top 5 items in May 2025",
+        "followupQuery": "how did they perform in June?",
+        "expectedBehavior": "Should track those same 5 items and show June performance",
+        "usesContext": ["items: top 5 from May", "time_period: May 2025"]
+      },
+      {
+        "id": "followup-03",
+        "setupQuery": "what was the best day in July 2025",
+        "followupQuery": "what about the worst day?",
+        "expectedBehavior": "Should find worst day in July 2025, same month context",
+        "usesContext": ["time_period: July 2025"]
+      },
+      {
+        "id": "followup-04",
+        "setupQuery": "weekday vs weekend in July 2025",
+        "followupQuery": "break it down by specific days of the week",
+        "expectedBehavior": "Should show Mon-Sun breakdown for July 2025",
+        "usesContext": ["time_period: July 2025", "day_types: weekday vs weekend"]
+      },
+      {
+        "id": "followup-05",
+        "setupQuery": "Salmon Roll sales in May 2025",
+        "followupQuery": "compare that to June",
+        "expectedBehavior": "Should compare Salmon Roll May vs June 2025",
+        "usesContext": ["item: Salmon Roll", "time_period: May 2025"]
+      }
+    ]
+  },
+  "metadata": {
+    "totalTests": 17,
+    "conversationFlows": 12,
+    "followUpTests": 5,
+    "generatedDate": "2025-10-29",
+    "purpose": "Test conversation context handling and history intelligence",
+    "validationCriteria": {
+      "contextCarryover": "Bot should intelligently use previous conversation context",
+      "relevanceFiltering": "Bot should include only relevant historical info, not extraneous data",
+      "pronounResolution": "Bot should resolve 'that', 'those', 'it', 'they' references correctly",
+      "implicitContext": "Bot should infer year, category, or time period from previous queries"
+    }
+  }
+}

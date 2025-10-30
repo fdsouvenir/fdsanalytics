@@ -16,10 +16,9 @@ restaurant-analytics/
 │       └── lint.yml
 │
 ├── services/
-│   ├── response-engine/
-│   ├── response-engine/
-│   ├── conversation-manager/
-│   └── gmail-ingestion/
+│   ├── response-engine/          # Main orchestrator (Cloud Run)
+│   ├── conversation-manager/     # Chat history manager (Cloud Run)
+│   └── gmail-ingestion/          # PMIX PDF parser (Cloud Function)
 │
 ├── shared/
 │   ├── types/
@@ -77,9 +76,13 @@ services/response-engine/
 │   │   └── ResponseFormatter.ts      # Format for Google Chat
 │   │
 │   ├── clients/
-│   │   ├── AnalyticsToolHandler.ts              # Call BigQuery analytics
-│   │   ├── ConversationClient.ts    # Call conversation manager
+│   │   ├── GeminiClient.ts           # Vertex AI Gemini integration
+│   │   ├── ConversationClient.ts     # Call conversation manager
 │   │   └── GoogleChatClient.ts       # Send messages to Chat
+│   │
+│   ├── tools/
+│   │   ├── AnalyticsToolHandler.ts   # Execute intent functions via BQ
+│   │   └── intentFunctions.ts        # 8 intent function definitions
 │   │
 │   └── config/
 │       ├── config.ts                 # Load environment config
@@ -204,147 +207,7 @@ export class ResponseEngine {
 
 ---
 
-## 3. Service: response-engine
-
-```
-services/response-engine/
-├── src/
-│   ├── index.ts                      # Entry point (Cloud Run)
-│   ├── server.ts                     # Direct BigQuery server
-│   │
-│   ├── tools/
-│   │   ├── queryAnalytics.tool.ts    # Main query tool
-│   │   ├── getForecast.tool.ts       # Forecast tool
-│   │   └── getAnomalies.tool.ts      # Anomalies tool
-│   │
-│   ├── bigquery/
-│   │   ├── BigQueryClient.ts         # BQ connection
-│   │   ├── StoredProcedures.ts       # Call stored procedures
-│   │   └── Validator.ts              # Parameter validation
-│   │
-│   ├── schemas/
-│   │   ├── toolSchemas.ts            # BQHandler tool definitions
-│   │   └── paramSchemas.ts           # Parameter validation schemas
-│   │
-│   └── config/
-│       └── config.ts
-│
-├── sql/                                # Empty - SQL moved to root /sql
-│   ├── stored-procedures/
-│   └── migrations/
-│
-├── __tests__/
-│   ├── unit/
-│   │   ├── queryAnalytics.test.ts
-│   │   └── Validator.test.ts
-│   │
-│   └── integration/
-│       └── bigquery.integration.test.ts
-│
-├── Dockerfile
-├── package.json
-└── README.md
-```
-
-**Note:** BigQuery stored procedures are located at `/sql/stored-procedures/` (root level) for shared access across services:
-- `/sql/stored-procedures/query_metrics.sql`
-- `/sql/stored-procedures/get_forecast.sql`
-- `/sql/stored-procedures/get_anomalies.sql`
-- `/sql/migrations/001_create_procedures.sql`
-
-**Key Files:**
-
-### src/tools/queryAnalytics.tool.ts
-```typescript
-import { BigQueryClient } from '../bigquery/BigQueryClient';
-import { Validator } from '../bigquery/Validator';
-
-export class QueryAnalyticsTool {
-  constructor(
-    private bq: BigQueryClient,
-    private validator: Validator
-  ) {}
-  
-  async execute(params: QueryAnalyticsParams): Promise<QueryAnalyticsResult> {
-    // 1. Validate parameters
-    await this.validator.validateCategory(params.filters?.primaryCategory);
-    await this.validator.validateTimeframe(params.timeframe);
-    
-    // 2. Call stored procedure
-    const result = await this.bq.callProcedure('restaurant_analytics.query_metrics', {
-      metric_name: params.metric,
-      start_date: this.getStartDate(params.timeframe),
-      end_date: this.getEndDate(params.timeframe),
-      primary_category: params.filters?.primaryCategory || null,
-      // ... other params
-    });
-    
-    return {
-      rows: result,
-      totalRows: result.length,
-      executionTimeMs: Date.now() - startTime
-    };
-  }
-}
-```
-
-### sql/stored-procedures/query_metrics.sql
-```sql
-CREATE OR REPLACE PROCEDURE `fdsanalytics.restaurant_analytics.query_metrics`(
-  metric_name STRING,
-  start_date DATE,
-  end_date DATE,
-  primary_category STRING,
-  subcategory STRING,
-  aggregation STRING,
-  group_by_fields ARRAY<STRING>,
-  max_rows INT64
-)
-BEGIN
-  -- Validate category exists
-  IF primary_category IS NOT NULL THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM `restaurant_analytics.metrics`
-      WHERE primary_category = primary_category
-      LIMIT 1
-    ) THEN
-      SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid primary_category';
-    END IF;
-  END IF;
-  
-  -- Build and execute query safely
-  EXECUTE IMMEDIATE FORMAT("""
-    SELECT %s
-    FROM `restaurant_analytics.metrics` m
-    JOIN `restaurant_analytics.reports` r ON m.report_id = r.report_id
-    WHERE r.report_date BETWEEN @start_date AND @end_date
-      AND m.metric_name = @metric_name
-      %s
-    %s
-    LIMIT @max_rows
-  """,
-    -- SELECT clause based on group_by_fields
-    CASE WHEN 'category' IN UNNEST(group_by_fields) 
-         THEN 'm.primary_category, ' ELSE '' END ||
-    'SUM(CAST(REPLACE(REPLACE(m.metric_value, "$", ""), ",", "") AS FLOAT64)) as total',
-    -- WHERE clause for filters
-    CASE WHEN primary_category IS NOT NULL 
-         THEN 'AND m.primary_category = @primary_category' ELSE '' END,
-    -- GROUP BY clause
-    CASE WHEN ARRAY_LENGTH(group_by_fields) > 0
-         THEN 'GROUP BY ' || ARRAY_TO_STRING(group_by_fields, ', ') ELSE '' END
-  )
-  USING start_date as start_date,
-        end_date as end_date,
-        metric_name as metric_name,
-        primary_category as primary_category,
-        max_rows as max_rows;
-END;
-```
-
----
-
-## 4. Service: conversation-manager
+## 3. Service: conversation-manager
 
 ```
 services/conversation-manager/
@@ -373,7 +236,7 @@ services/conversation-manager/
 
 ---
 
-## 5. Service: gmail-ingestion
+## 4. Service: gmail-ingestion
 
 ```
 services/gmail-ingestion/
@@ -438,7 +301,7 @@ export async function ingestReports(message: PubSubMessage, context: Context) {
 
 ---
 
-## 6. Shared Code
+## 5. Shared Code
 
 ```
 shared/
@@ -578,7 +441,7 @@ export class Logger {
 
 ---
 
-## 7. Scripts
+## 6. Scripts
 
 ```
 scripts/
@@ -613,33 +476,30 @@ REGION="us-central1"
 
 echo "🚀 Deploying all services..."
 
-# 1. Deploy BigQuery analytics (no dependencies)
-echo "📦 Deploying BigQuery analytics..."
-
-# 2. Deploy Conversation Manager (no dependencies)
+# 1. Deploy Conversation Manager (no dependencies)
 echo "💬 Deploying Conversation Manager..."
 ./scripts/deploy/deploy-conversation-manager.sh
 
-# 3. Deploy Response Engine (depends on BigQuery Conversation Manager)
+# 2. Deploy Response Engine (depends on Conversation Manager)
 echo "🤖 Deploying Response Engine..."
+./scripts/deploy/deploy-response-engine.sh
 
-# 4. Deploy Gmail Ingestion (independent)
+# 3. Deploy Gmail Ingestion (independent)
 echo "📧 Deploying Gmail Ingestion..."
 ./scripts/deploy/deploy-gmail-ingestion.sh
 
-echo "✅ All services deployed successfully!"
+echo "✅ All 3 services deployed successfully!"
 
 # Print service URLs
 echo ""
 echo "📋 Service URLs:"
 echo "Response Engine: $(gcloud run services describe response-engine --region $REGION --format 'value(status.url)')"
-echo "BigQuery analytics: $(gcloud run services describe response-engine --region $REGION --format 'value(status.url)')"
 echo "Conversation Manager: $(gcloud run services describe conversation-manager --region $REGION --format 'value(status.url)')"
 ```
 
 ---
 
-## 8. Documentation
+## 7. Documentation
 
 ```
 docs/
@@ -662,7 +522,7 @@ docs/
 
 ---
 
-## 9. Configuration Files
+## 8. Configuration Files
 
 ### package.json (Root)
 ```json
@@ -761,24 +621,19 @@ services:
       - ./services/response-engine:/app
       - /app/node_modules
 
-  response-engine:
-    build: ./services/response-engine
+  conversation-manager:
+    build: ./services/conversation-manager
     ports:
       - "3001:8080"
     environment:
       - PROJECT_ID=fdsanalytics-test
 
-  conversation-manager:
-    build: ./services/conversation-manager
-    ports:
-      - "3002:8080"
-    environment:
-      - PROJECT_ID=fdsanalytics-test
+  # Note: gmail-ingestion is a Cloud Function, not included in docker-compose
 ```
 
 ---
 
-## 10. File Naming Conventions
+## 9. File Naming Conventions
 
 ### TypeScript Files
 - **Classes:** PascalCase - `ResponseEngine.ts`
@@ -800,7 +655,7 @@ services:
 
 ---
 
-## 11. Import Patterns
+## 10. Import Patterns
 
 ### Absolute Imports (Use Path Aliases)
 ```typescript
@@ -831,7 +686,7 @@ import { Logger, retry } from '@shared/utils';
 
 ---
 
-## 12. Environment-Specific Files
+## 11. Environment-Specific Files
 
 ```
 .env.development          # Local development (gitignored)

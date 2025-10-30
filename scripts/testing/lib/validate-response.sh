@@ -16,29 +16,53 @@ fi
 
 # Call Claude CLI for validation (uses 'haiku' alias for latest Haiku model)
 VALIDATION=$(cat <<PROMPT | claude --print --model haiku 2>&1
-Validate this chatbot response. Return ONLY valid JSON, no explanation.
+You are a QA engineer testing an AI-powered restaurant analytics chatbot.
+
+SYSTEM UNDER TEST:
+The chatbot helps restaurant owners analyze sales data from BigQuery. It answers questions about:
+- Sales trends (daily, weekly, monthly comparisons)
+- Category performance (Sushi, Beer, Food, etc.)
+- Time period comparisons (May vs June, weekdays vs weekends)
+- Top selling items
+- Specific item performance tracking
+
+Users ask natural language questions like:
+- "What were sales in May 2025?"
+- "Compare weekday vs weekend sales in July"
+- "Show me top 10 items last month"
+- "How is Salmon Roll selling this month?"
+
+EXPECTED BEHAVIOR:
+✓ Good responses provide RELEVANT, SPECIFIC data directly answering the question
+✓ Include dollar amounts, percentages, dates, item names, comparisons
+✓ Stay focused on what was asked - no extraneous information
+✓ If no data exists, explain why (e.g., "Data only available through Oct 2025")
+
+✗ Bad responses deflect, ask questions back, provide errors, or include unrelated data
+
+YOUR TASK:
+Evaluate if this response properly answers the user's query.
 
 User Query: "$QUERY"
 Chatbot Response: "$RESPONSE"
 
-Output format (nothing else): {"valid": true|false, "reason": "2-4 words"}
+Return ONLY valid JSON: {"valid": true|false, "reason": "2-6 words describing issue or success"}
 
-Mark as INVALID (valid: false) if response:
-- Asks a question back to the user (ends with "?" or asks for clarification)
-- Says "I don't have", "no data", "can't provide", "unable to", "I'm not sure"
-- Contains error messages ("went wrong", "error occurred", "failed to", "Something went wrong")
-- Apologizes without providing data
-- Provides NO actual numbers, figures, percentages, or analytics
-- Says "What category", "What is the comparison", "Can you specify"
-- Is just a deflection or asks user to provide more info
-- Is nonsensical or obviously wrong
+Mark INVALID if the response:
+- Contains data unrelated to the query (e.g., talks about May when asked about July)
+- Includes extraneous information from other topics
+- Asks clarifying questions instead of answering
+- Says "I don't have", "can't provide", "I'm not sure" without context
+- Contains error messages ("went wrong", "Something went wrong")
+- Has NO specific data (no numbers, dates, or analytics)
+- Gives logically impossible results (e.g., weekend sales = \$0.00)
 
-Mark as VALID (valid: true) ONLY if response:
-- Contains actual dollar amounts, numbers, percentages, or specific data
-- Provides specific dates, timeframes, or comparisons
-- Gives concrete analytics data or insights
-- Actually answers the query with DATA (not questions)
-- Even "No data found" is OK if it explains WHY or provides context
+Mark VALID if the response:
+- Directly addresses what the user asked
+- ALL data is relevant to the specific query
+- Contains specific numbers, percentages, dates, or comparisons
+- Provides concrete analytics answering the question
+- Even "No data found" is OK if it explains why with proper context
 PROMPT
 )
 

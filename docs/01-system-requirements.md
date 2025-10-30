@@ -12,7 +12,7 @@
 
 Build a conversational analytics assistant that allows restaurant managers to query sales data via Google Chat. The system ingests daily PMIX reports from Gmail, stores data in BigQuery, and uses Gemini AI to provide natural language responses with charts.
 
-**Key Innovation:** Secure-by-design query architecture using BigQuery analyticss and BigQuery stored procedures to prevent SQL injection.
+**Key Innovation:** Secure-by-design query architecture using direct BigQuery access and BigQuery stored procedures to prevent SQL injection.
 
 ---
 
@@ -97,7 +97,7 @@ Users can ask about:
 ### 3.4 Scalability (Design for Future)
 - Architecture supports **multi-tenant** without refactor
 - BQ dataset per tenant (data isolation)
-- BigQuery analyticss stateless (horizontal scaling)
+- Response Engine stateless (horizontal scaling)
 - Conversation history bounded (last 10 messages)
 
 ### 3.5 Maintainability
@@ -118,15 +118,16 @@ Users can ask about:
 ## 4. Technical Constraints
 
 ### 4.1 Platform
-- **GCP only** - Cloud Functions (Gen2), Cloud Run, BigQuery, Secret Manager
+- **GCP only** - Cloud Run, BigQuery, Vertex AI, Secret Manager
 - **Node.js 20** runtime
 - **Existing BQ project:** `fdsanalytics`
 - **Region:** us-central1
 
 ### 4.2 External Dependencies
-- **Gemini API:**
-  - Flash for conversation management
-  - Pro (2.5) for response generation
+- **Vertex AI Gemini:**
+  - gemini-2.5-flash for response generation and function calling
+  - Uses Application Default Credentials (no API key management)
+  - Regional endpoint: us-central1
 - **Google Chat API** (Workspace addon)
 - **Gmail API** (readonly scope)
 - **quickchart.io** (free tier, no auth)
@@ -138,11 +139,11 @@ Users can ask about:
 - **Existing schema:** restaurant_analytics.reports, restaurant_analytics.metrics
 
 ### 4.4 Cost Targets
-- **Gemini API:** <$50/month (single tenant)
+- **Vertex AI Gemini (Flash):** <$30/month (single tenant, ~1000 queries/month)
 - **BQ storage:** ~1GB (<$0.50/month)
 - **BQ queries:** <$10/month
-- **Cloud Functions:** Free tier eligible
-- **Total:** <$100/month for single tenant
+- **Cloud Run:** <$20/month (3 services, low traffic)
+- **Total:** <$75/month for single tenant
 
 ---
 
@@ -265,10 +266,12 @@ Users can ask about:
 - **Operations:** Query, insert (MERGE), create tables
 - **Quota:** 100 concurrent queries, 2000 slots
 
-### 8.4 Gemini API
-- **Authentication:** API Key (Secret Manager)
-- **Models:** gemini-2.5-flash, gemini-2.5-pro
+### 8.4 Vertex AI Gemini API
+- **Authentication:** Application Default Credentials
+- **Models:** gemini-2.5-flash (primary), gemini-2.5-pro (optional)
+- **Region:** us-central1
 - **Rate Limits:** 10 requests/minute (Flash), 2 requests/minute (Pro)
+- **Dependencies:** `@google-cloud/vertexai` npm package, `roles/aiplatform.user` IAM role
 
 ### 8.5 quickchart.io
 - **Authentication:** None (free tier)
@@ -290,8 +293,8 @@ SpotOn → Gmail → Cloud Scheduler → Cloud Function
 ### 9.2 Query Flow
 ```
 User → Google Chat → Response Engine → Tenant Resolver
-→ Conversation Manager (Flash) → Response Generator (Pro)
-→ BigQuery analytics → BQ Stored Procedure → Data
+→ Response Generator (Gemini Flash with function calling)
+→ AnalyticsToolHandler → BQ Stored Procedure → Data
 → Chart Builder → Response Engine → Google Chat → User
 ```
 

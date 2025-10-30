@@ -177,9 +177,71 @@ primary_category | subcategory         | usage_count | last_seen
 
 ## 3. insights Dataset (Pre-computed Analytics)
 
+### 3.0 Hybrid Cache System Overview
+
+**Purpose:** Optimize query performance by caching pre-computed analytics
+
+The `insights` dataset implements a **hybrid cache system** that provides two query paths:
+
+1. **Fast Path (Cache Hit):** Read from `insights.daily_comparisons` via `sp_get_daily_summary` (~1-2s)
+2. **Slow Path (Cache Miss):** Aggregate from `restaurant_analytics.metrics` via `query_metrics` (~4-8s)
+
+**How it works:**
+
+```
+User Query: "daily sales in May 2025"
+     ↓
+AnalyticsToolHandler.showDailySales()
+     ↓
+Check Coverage: sp_check_insights_coverage(May 1-31)
+     ↓
+   Is Fully Covered?
+     ↓                    ↓
+   YES (Fast)          NO (Slow)
+     ↓                    ↓
+sp_get_daily_summary  query_metrics
+  (1-2 seconds)       (4-8 seconds)
+```
+
+**Coverage Check Logic:**
+
+```typescript
+// services/response-engine/src/tools/AnalyticsToolHandler.ts:774-820
+private async checkInsightsCoverage(startDate: string, endDate: string): Promise<{
+  isFullyCovered: boolean;
+  coveragePercent: number;
+}> {
+  const result = await this.callStoredProcedure(
+    'sp_check_insights_coverage',
+    { start_date: startDate, end_date: endDate, customer_id: this.customerId },
+    'insights'
+  );
+
+  return {
+    isFullyCovered: result.rows[0].is_fully_covered,
+    coveragePercent: result.rows[0].coverage_percent
+  };
+}
+```
+
+**Key Stored Procedures:**
+- `insights.sp_check_insights_coverage` - Check if date range is cached (lines 1-58 in sql/insights/)
+- `insights.sp_get_daily_summary` - Read from cache (fast path)
+- `insights.populate_daily_insights` - Populate cache for a target date (MERGE for idempotency)
+
+**Cache Population:**
+- **Trigger:** Gmail Ingestion after processing PMIX report
+- **Pattern:** MERGE upserts ensure idempotency (safe to re-run)
+- **Scope:** Currently populates `daily_comparisons`, `category_trends`, `top_items`, `daily_forecast`
+
+**Performance Impact:**
+- Cache hit: ~1-2 seconds (75% faster)
+- Cache miss: ~4-8 seconds (falls back to raw aggregation)
+- Coverage tracking: Only checks dates with reports (not all calendar dates)
+
 ### 3.1 daily_comparisons (Existing - No Changes)
 
-**Purpose:** Day-of-week comparisons with anomaly detection
+**Purpose:** Day-of-week comparisons with anomaly detection (CACHE TABLE)
 
 ```sql
 CREATE TABLE `fdsanalytics.insights.daily_comparisons` (

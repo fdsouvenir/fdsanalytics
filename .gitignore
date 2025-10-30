@@ -63,3 +63,7 @@ GEMINI_API_KEY
 Dockerfile.local
 scripts/testing/node_modules/
 .env.local
+
+# Backup files
+*.backup
+*.bak

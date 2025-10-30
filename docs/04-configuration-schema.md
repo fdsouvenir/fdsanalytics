@@ -26,9 +26,9 @@ BQ_DATASET_CHAT_HISTORY=chat_history
 BQ_DATASET_INGESTION=ingestion
 
 # ============================================================================
-# Secret Manager References
+# Secret Manager References (LEGACY)
 # ============================================================================
-GEMINI_SECRET_NAME=GEMINI_API_KEY
+GEMINI_SECRET_NAME=GEMINI_API_KEY  # LEGACY: Not used with Vertex AI (uses ADC)
 GMAIL_OAUTH_SECRET_NAME=GMAIL_OAUTH_CREDENTIALS
 
 # ============================================================================
@@ -50,7 +50,7 @@ LOG_LEVEL=debug
 ENABLE_CHARTS=true
 ENABLE_FORECASTS=true
 ENABLE_ANOMALY_DETECTION=true
-ENABLE_CONVERSATION_HISTORY=true
+ENABLE_CONVERSATION_HISTORY=false  # Disabled for performance in V1
 
 # ============================================================================
 # Rate Limits & Constraints
@@ -100,9 +100,9 @@ BQ_DATASET_CHAT_HISTORY=chat_history
 BQ_DATASET_INGESTION=ingestion
 
 # ============================================================================
-# Secret Manager References
+# Secret Manager References (LEGACY)
 # ============================================================================
-GEMINI_SECRET_NAME=GEMINI_API_KEY
+GEMINI_SECRET_NAME=GEMINI_API_KEY  # LEGACY: Not used with Vertex AI (uses ADC)
 GMAIL_OAUTH_SECRET_NAME=GMAIL_OAUTH_CREDENTIALS
 
 # ============================================================================
@@ -124,7 +124,7 @@ LOG_LEVEL=info                            # Less verbose in prod
 ENABLE_CHARTS=true
 ENABLE_FORECASTS=true
 ENABLE_ANOMALY_DETECTION=true
-ENABLE_CONVERSATION_HISTORY=true
+ENABLE_CONVERSATION_HISTORY=false  # Disabled for performance in V1
 
 # ============================================================================
 # Rate Limits & Constraints
@@ -151,7 +151,7 @@ CHART_BUILDER_URL=https://quickchart.io
 # ============================================================================
 # Production Settings
 # ============================================================================
-USE_ADC_AUTH=false                        # Use service accounts
+USE_ADC_AUTH=true                         # Vertex AI uses ADC automatically
 SKIP_GMAIL_AUTH=false
 ```
 
@@ -159,34 +159,30 @@ SKIP_GMAIL_AUTH=false
 
 ## 2. Secrets (Google Secret Manager)
 
-### 2.1 GEMINI_API_KEY
+### 2.1 GEMINI_API_KEY (LEGACY - NOT USED)
 
-**Secret Name:** `GEMINI_API_KEY`  
-**Type:** API Key (string)  
-**Rotation:** Manual (as needed)  
-**Access:** All Cloud Functions, Cloud Run services
+**Secret Name:** `GEMINI_API_KEY`
+**Status:** ⚠️ LEGACY - No longer used with Vertex AI
+**Type:** API Key (string)
+**Rotation:** N/A (deprecated)
 
-**Structure:**
-```
-AIza...xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+**Why deprecated:**
+- Vertex AI uses Application Default Credentials (ADC) instead of API keys
+- Service accounts automatically have access via IAM role `roles/aiplatform.user`
+- No secret management required for Vertex AI authentication
 
-**Access Pattern:**
+**Current Authentication (Vertex AI):**
 ```typescript
-const secretClient = new SecretManagerServiceClient();
-const [version] = await secretClient.accessSecretVersion({
-  name: `projects/${PROJECT_ID}/secrets/GEMINI_API_KEY/versions/latest`
+import { VertexAI } from '@google-cloud/vertexai';
+
+// No API key needed - uses ADC automatically
+const vertexAI = new VertexAI({
+  project: process.env.PROJECT_ID,
+  location: 'us-central1'
 });
-const apiKey = version.payload.data.toString('utf8');
 ```
 
-**Create Command:**
-```bash
-echo -n "YOUR_API_KEY" | gcloud secrets create GEMINI_API_KEY \
-  --project=fdsanalytics \
-  --replication-policy="automatic" \
-  --data-file=-
-```
+**Note:** The `GEMINI_SECRET_NAME` environment variable is kept for backwards compatibility but is unused.
 
 ### 2.2 GMAIL_OAUTH_CREDENTIALS
 
@@ -263,6 +259,7 @@ interface TenantConfig {
   enableCharts: boolean;
   enableForecasts: boolean;
   enableAnomalyDetection: boolean;
+  enableConversationHistory: boolean;  // Currently false for V1
   
   // Metadata
   createdAt: Date;
@@ -282,6 +279,7 @@ const SENSO_CONFIG: TenantConfig = {
   enableCharts: true,
   enableForecasts: true,
   enableAnomalyDetection: true,
+  enableConversationHistory: false,  // Disabled for performance
   createdAt: new Date('2025-01-01'),
   status: 'active'
 };
@@ -336,7 +334,7 @@ if (FEATURE_FLAGS.charts) {
 **Permissions:**
 - `roles/bigquery.jobUser` - Run queries
 - `roles/bigquery.dataViewer` - Read from all datasets
-- `roles/secretmanager.secretAccessor` - Read GEMINI_API_KEY
+- `roles/aiplatform.user` - Access Vertex AI Gemini API
 - `roles/logging.logWriter` - Write logs
 
 **IAM Bindings:**
@@ -357,18 +355,20 @@ gcloud projects add-iam-policy-binding fdsanalytics \
 **Permissions:**
 - `roles/bigquery.jobUser` - Run MERGE queries
 - `roles/bigquery.dataEditor` - Write to ingestion, restaurant_analytics datasets
-- `roles/secretmanager.secretAccessor` - Read GMAIL_OAUTH_CREDENTIALS, GEMINI_API_KEY
+- `roles/secretmanager.secretAccessor` - Read GMAIL_OAUTH_CREDENTIALS
+- `roles/aiplatform.user` - Access Vertex AI for PDF parsing
 - `roles/logging.logWriter` - Write logs
 
 **Additional:** Gmail API OAuth scopes (user-granted, not service account)
 
-### 4.3 BigQuery analytics Service Account
+### 4.3 Conversation Manager Service Account
 
-**Name:** `response-engine@fdsanalytics.iam.gserviceaccount.com`
+**Name:** `conversation-manager@fdsanalytics.iam.gserviceaccount.com`
 
 **Permissions:**
-- `roles/bigquery.jobUser` - Execute stored procedures
-- `roles/bigquery.dataViewer` - Read query results
+- `roles/bigquery.jobUser` - Query chat history
+- `roles/bigquery.dataEditor` - Write chat history
+- `roles/aiplatform.user` - Access Vertex AI for summarization
 - `roles/logging.logWriter` - Write logs
 
 ---

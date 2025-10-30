@@ -148,6 +148,14 @@ export function parseRelativeDate(
     };
   }
 
+  // Parse "Q1", "Q2", "Q3", "Q4" (with optional year: "Q1 2025", "Q2 2024", etc.)
+  const quarterMatch = expr.match(/^q([1-4])(?:\s+(\d{4}))?$/i);
+  if (quarterMatch) {
+    const quarter = parseInt(quarterMatch[1]);
+    const year = quarterMatch[2] ? parseInt(quarterMatch[2]) : referenceDate.getFullYear();
+    return getQuarterRange(quarter, year);
+  }
+
   // Unable to parse
   return null;
 }

@@ -30,11 +30,11 @@ Gmail API → Gmail Ingestion → BigQuery
 ```
 
 **Services:**
-1. **Response Engine** (Cloud Run) - Orchestrates Gemini Pro with function calling for analytics queries
+1. **Response Engine** (Cloud Run) - Orchestrates Vertex AI Gemini 2.5 Flash with hybrid stateless-then-stateful function calling for analytics queries
 2. **Conversation Manager** (Cloud Run) - Context extraction and message history
 3. **Gmail Ingestion** (Cloud Function) - PMIX PDF parsing from Gmail
 
-**Security Design:** Gemini function calls → AnalyticsToolHandler validates parameters → BigQuery stored procedures prevent SQL injection
+**Security Design:** Vertex AI Gemini function calls → AnalyticsToolHandler validates parameters → BigQuery stored procedures prevent SQL injection
 
 ## Common Development Commands
 
@@ -158,16 +158,27 @@ WHERE DATE(report_date) = DATE('2025-10-20')
 WHERE report_date = '2025-10-20'
 ```
 
-### 4. Gemini Model Selection
+### 4. Vertex AI Gemini Model Selection & Thinking Mode
 
-**Available models (January 2025):**
-- `gemini-2.5-flash-lite` - Fast, cheap for PDF extraction and intent classification
-- `gemini-2.5-pro` - Expensive, powerful for complex analysis
-- `gemini-2.0-flash` - For function calling
+**Primary Model:** `gemini-2.5-flash`
+- Used for function calling (hybrid stateless-then-stateful approach)
+- Thinking mode enabled with 1024 token budget
+- Temperature: 1, topP: 0.95
+- Regional endpoint: us-central1
+
+**Hybrid Function Calling Approach:**
+1. **Phase 1 (Stateless):** mode:ANY forces function call on first turn
+2. **Phase 2 (Stateful):** mode:AUTO continues conversation with natural response
+3. **Thinking Mode:** Separates reasoning (thought parts) from final answer (answer parts)
+
+**Other Models:**
+- `gemini-2.5-flash-lite` - Fast, cheap for PDF extraction and context summarization
+- `gemini-2.5-pro` - Expensive, powerful for complex analysis (optional)
 
 **NEVER use:**
 - Models with date suffixes (e.g., `gemini-2.5-flash-lite-20250122`)
 - Any 1.x models (deprecated)
+- `gemini-2.0-flash` (superseded by 2.5-flash)
 
 ### 5. Avoid Cartesian Products in BigQuery
 
@@ -202,9 +213,14 @@ GROUP BY category;  -- Multiple rows per category!
 ### Response Engine (Port 3000)
 - **Entry:** `services/response-engine/src/index.ts`
 - **Role:** Main orchestrator, handles Google Chat webhooks
-- **Dependencies:** Conversation Manager, Gemini Pro, BigQuery
-- **Environment:** `CONVERSATION_MANAGER_URL`, `GEMINI_SECRET_NAME`
-- **Key Logic:** `src/core/ResponseEngine.ts`, `src/core/ResponseGenerator.ts`, `src/tools/AnalyticsToolHandler.ts`
+- **Dependencies:** Conversation Manager, Vertex AI Gemini 2.5 Flash, BigQuery
+- **Authentication:** Application Default Credentials (ADC) for Vertex AI
+- **Environment:** `CONVERSATION_MANAGER_URL`
+- **Key Logic:**
+  - `src/core/ResponseEngine.ts` - Main orchestration logic
+  - `src/core/ResponseGenerator.ts` - Hybrid stateless-then-stateful function calling
+  - `src/tools/AnalyticsToolHandler.ts` - Executes 8 intent functions via BigQuery
+  - `src/clients/GeminiClient.ts` - Vertex AI SDK wrapper
 
 ### Conversation Manager (Port 3002)
 - **Entry:** `services/conversation-manager/src/index.ts`
@@ -323,11 +339,14 @@ BQ_DATASET_INGESTION=ingestion
 - **Data models:** `docs/03-data-models.md`
 - **Testing strategy:** `docs/06-testing-strategy.md`
 - **Deployment guide:** `docs/07-deployment-architecture.md`
+- **Vertex AI integration:** `docs/09-gemini-integration.md` (hybrid function calling, thinking mode)
+- **Intent functions:** `docs/10-intent-functions.md` (all 8 functions + hybrid cache)
 
 ## Key Files to Understand
 
 - `services/response-engine/src/core/ResponseEngine.ts` - Main orchestration logic
-- `services/response-engine/src/core/ResponseGenerator.ts` - Gemini function calling orchestration
+- `services/response-engine/src/core/ResponseGenerator.ts` - Hybrid stateless-then-stateful function calling
+- `services/response-engine/src/clients/GeminiClient.ts` - Vertex AI SDK wrapper with thinking mode
 - `services/response-engine/src/tools/AnalyticsToolHandler.ts` - Executes intent functions via BigQuery
 - `services/response-engine/src/tools/intentFunctions.ts` - 8 intent function definitions
 - `services/gmail-ingestion/src/parsers/PmixParser.ts` - PDF extraction with Gemini
@@ -338,6 +357,8 @@ BQ_DATASET_INGESTION=ingestion
 
 ## Recent Improvements
 
+- **October 2025:** Migrated to Vertex AI with hybrid stateless-then-stateful function calling
+- **October 2025:** Implemented thinking mode (1024 token budget) for improved reasoning
 - **October 2025:** Deployed all 7 missing BigQuery stored procedures
 - **October 2025:** Fixed SQL column alias bugs in query_metrics procedure
 - **October 2025:** Built comprehensive automated test suite with AI validation

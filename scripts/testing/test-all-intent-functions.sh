@@ -12,10 +12,16 @@
 #   --output-dir <path>  Output directory for logs (default: ./test-results)
 #   --wait-time <secs>   Wait time after sending query (default: 12)
 #   --continuous         Run continuously in monitoring mode
+#   --test-file <path>   Test file to use (default: test-queries.json)
+#   --mode <mode>        Test mode: isolated|contextual (default: contextual)
+#                        isolated: unique thread per test, clears history
+#                        contextual: shared thread, maintains conversation
 #
 # Example:
 #   ./scripts/testing/test-all-intent-functions.sh
 #   ./scripts/testing/test-all-intent-functions.sh --function compare_periods
+#   ./scripts/testing/test-all-intent-functions.sh --test-file test-queries-isolated.json --mode isolated
+#   ./scripts/testing/test-all-intent-functions.sh --test-file test-queries-contextual.json --mode contextual
 
 set -e
 
@@ -32,6 +38,8 @@ OUTPUT_DIR="$PROJECT_ROOT/test-results"
 WAIT_TIME=60  # Increased from 30 to allow Cloud Logging propagation
 TEST_FUNCTION=""
 CONTINUOUS_MODE=false
+TEST_FILE="test-queries.json"
+TEST_MODE="contextual"  # isolated|contextual
 
 # Colors
 GREEN='\033[0;32m'
@@ -64,6 +72,14 @@ while [[ $# -gt 0 ]]; do
             CONTINUOUS_MODE=true
             shift
             ;;
+        --test-file)
+            TEST_FILE="$2"
+            shift 2
+            ;;
+        --mode)
+            TEST_MODE="$2"
+            shift 2
+            ;;
         --help)
             head -n 20 "$0" | grep "^#" | sed 's/^# *//'
             exit 0
@@ -75,6 +91,12 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Validate test mode
+if [ "$TEST_MODE" != "isolated" ] && [ "$TEST_MODE" != "contextual" ]; then
+    echo -e "${RED}Error: --mode must be 'isolated' or 'contextual'${NC}"
+    exit 1
+fi
 
 # Auto-detect latest revision if not specified
 if [ -z "$REVISION" ]; then
@@ -96,9 +118,9 @@ mkdir -p "$RUN_DIR"
 REPORT_FILE="$RUN_DIR/TEST_REPORT.md"
 
 # Load test queries from JSON
-QUERIES_FILE="$SCRIPT_DIR/test-queries.json"
+QUERIES_FILE="$SCRIPT_DIR/$TEST_FILE"
 if [ ! -f "$QUERIES_FILE" ]; then
-    echo -e "${RED}Error: test-queries.json not found${NC}"
+    echo -e "${RED}Error: $TEST_FILE not found at $QUERIES_FILE${NC}"
     exit 1
 fi
 
@@ -150,6 +172,15 @@ EOF
     # Record timestamp for log filtering
     LOG_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
 
+    # Determine thread ID based on test mode
+    # - isolated mode: unique thread per test (clears history)
+    # - contextual mode: shared thread (maintains conversation)
+    if [ "$TEST_MODE" = "isolated" ]; then
+        THREAD_ID="test-thread-isolated-${test_id}-$(date +%s)"
+    else
+        THREAD_ID="test-thread-contextual-shared"
+    fi
+
     # Create Google Chat webhook payload
     PAYLOAD=$(cat <<EOFPAYLOAD
 {
@@ -165,7 +196,7 @@ EOF
         "text": "$query",
         "argumentText": "$query",
         "thread": {
-          "name": "spaces/test-space/threads/test-thread-${test_id}"
+          "name": "spaces/test-space/threads/${THREAD_ID}"
         }
       },
       "space": {
@@ -386,10 +417,12 @@ run_tests() {
     echo -e "${BLUE}║  Run #$run_number                                         ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo "Service:    $SERVICE_URL"
-    echo "Revision:   $REVISION"
-    echo "Output Dir: $RUN_DIR"
-    echo "Time:       $(date)"
+    echo "Service:     $SERVICE_URL"
+    echo "Revision:    $REVISION"
+    echo "Test File:   $TEST_FILE"
+    echo "Test Mode:   $TEST_MODE"
+    echo "Output Dir:  $RUN_DIR"
+    echo "Time:        $(date)"
     echo ""
 
     # Initialize markdown report
@@ -399,6 +432,8 @@ run_tests() {
 **Date:** $(date)
 **Revision:** $REVISION
 **Service URL:** $SERVICE_URL
+**Test File:** $TEST_FILE
+**Test Mode:** $TEST_MODE $([ "$TEST_MODE" = "isolated" ] && echo "(unique thread per test)" || echo "(shared conversation thread)")
 
 EOF
 
