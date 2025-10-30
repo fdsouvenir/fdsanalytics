@@ -205,20 +205,16 @@ export class GeminiClient {
         },
         generationConfig: {
           temperature: 1,
-          topP: 0.95
+          topP: 0.95,
+          thinkingConfig: {
+            thinkingBudget: 1024,
+            includeThoughts: true
+          }
         }
       };
 
       if (functionDeclarations.length > 0) {
         modelConfig.tools = [{ functionDeclarations }];
-
-        // Force function calling mode for faster tool selection
-        // Mode 'ANY' eliminates "should I call a function?" decision step
-        modelConfig.toolConfig = {
-          functionCallingConfig: {
-            mode: 'ANY'
-          }
-        };
       }
 
       const prepDuration = Date.now() - prepStart;
@@ -301,16 +297,30 @@ export class GeminiClient {
         }
       }
 
-      // No function call, return text
+      // No function call, extract thinking and return text
+      const { thinkingSummaries, answerText } = this.extractThinkingAndAnswer(candidates);
+
       const parseDuration = Date.now() - parseStart;
+
+      // Log thinking summaries for test analysis
+      if (thinkingSummaries.length > 0) {
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Gemini thinking summary captured',
+          thinkingCount: thinkingSummaries.length,
+          thinkingPreview: thinkingSummaries[0].substring(0, 200),
+          thoughtsTokenCount: (response.usageMetadata as any)?.thoughtsTokenCount || 0
+        }));
+      }
+
       console.log(JSON.stringify({
         severity: 'DEBUG',
         message: 'Response parsed (text response)',
-        durationMs: parseDuration
+        durationMs: parseDuration,
+        hasThinking: thinkingSummaries.length > 0
       }));
 
-      const text = candidates[0]?.content?.parts?.[0]?.text || '';
-      return { text };
+      return { text: answerText };
     } catch (error: any) {
       console.error('Vertex AI chat API error', { error: error.message });
 
@@ -451,8 +461,10 @@ export class GeminiClient {
   }
 
   /**
-   * Generate response with function calling in ONE continuous chat session
-   * This eliminates the "fake history" overhead of two separate API calls
+   * Hybrid stateless-then-stateful approach with function calling
+   * Step 1: Force function call with mode: 'ANY' (stateless)
+   * Step 2: Execute function
+   * Step 3: Get final text response with new chat session (stateful, mode: AUTO)
    */
   async generateWithFunctionCalling(
     input: GenerateChatResponseInput,
@@ -470,19 +482,18 @@ export class GeminiClient {
 
     console.log(JSON.stringify({
       severity: 'DEBUG',
-      message: 'Starting continuous chat session',
+      message: 'Starting hybrid function calling approach',
       durationMs: initDuration,
       location: this.location
     }));
 
     try {
-      // Use override model if provided, otherwise use default
       const modelToUse = modelOverride || this.modelName;
 
       if (modelOverride) {
         console.log(JSON.stringify({
           severity: 'DEBUG',
-          message: 'Using model override for continuous chat',
+          message: 'Using model override for hybrid function calling',
           defaultModel: this.modelName,
           overrideModel: modelToUse
         }));
@@ -499,288 +510,229 @@ export class GeminiClient {
         parameters: fn.parameters
       }));
 
-      // Create model with system instruction and tools
-      const modelConfig: any = {
+      const prepDuration = Date.now() - prepStart;
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Hybrid function calling prepared',
+        durationMs: prepDuration,
+        functionCount: functionDeclarations.length
+      }));
+
+      // ============================================================
+      // STEP 1: Force function call with mode: 'ANY' (stateless)
+      // ============================================================
+
+      // Manually construct contents for stateless call
+      const contents: any[] = [
+        ...history,
+        { role: 'user', parts: [{ text: input.userMessage }] }
+      ];
+
+      // Create model config with mode: 'ANY' to force function call
+      const modelConfigWithAny: any = {
         model: modelToUse,
         systemInstruction: {
           parts: [{ text: input.systemInstruction }]
         },
         generationConfig: {
           temperature: 1,
-          topP: 0.95
+          topP: 0.95,
+          thinkingConfig: {
+            thinkingBudget: 1024,
+            includeThoughts: true
+          }
         }
       };
 
       if (functionDeclarations.length > 0) {
-        modelConfig.tools = [{ functionDeclarations }];
-        // Use AUTO mode (default) - let Gemini decide when to call functions vs generate text
-        // This is more reliable than forcing mode: 'ANY' which can cause infinite loops
+        modelConfigWithAny.tools = [{ functionDeclarations }];
+        modelConfigWithAny.toolConfig = {
+          functionCallingConfig: {
+            mode: 'ANY'  // Force function call on this turn only
+          }
+        };
       }
 
-      const prepDuration = Date.now() - prepStart;
-      console.log(JSON.stringify({
-        severity: 'DEBUG',
-        message: 'Continuous chat prepared',
-        durationMs: prepDuration,
-        functionCount: functionDeclarations.length
-      }));
-
-      // Start chat session with AUTO mode (no toolConfig = Gemini decides)
-      const modelStart = Date.now();
-      const model = this.vertexAI.getGenerativeModel(modelConfig);
-      const chat = model.startChat({
-        history: history
-      });
-      const modelDuration = Date.now() - modelStart;
+      const modelForFirstCall = this.vertexAI.getGenerativeModel(modelConfigWithAny);
 
       console.log(JSON.stringify({
         severity: 'DEBUG',
-        message: 'Chat session started with AUTO mode',
-        durationMs: modelDuration,
-        location: this.location
-      }));
-
-      // Step 1: Send user message (Gemini will decide whether to call function or generate text)
-      const apiCall1Start = Date.now();
-      console.log(JSON.stringify({
-        severity: 'DEBUG',
-        message: 'Sending initial message (AUTO mode - Gemini chooses function or text)',
+        message: 'Sending stateless call with mode: ANY to force function call',
         messageLength: input.userMessage.length,
         location: this.location
       }));
 
-      const result1 = await chat.sendMessage(input.userMessage);
+      const apiCall1Start = Date.now();
+      const result1 = await modelForFirstCall.generateContent({
+        contents: contents
+      });
       const apiCall1Duration = Date.now() - apiCall1Start;
 
       console.log(JSON.stringify({
         severity: 'INFO',
-        message: 'Initial response received',
+        message: 'Stateless function call received',
         model: modelToUse,
         durationMs: apiCall1Duration,
         location: this.location
       }));
 
-      // Check for function call
+      // Extract function calls from response
       const response1 = result1.response;
-      const candidates = response1.candidates || [];
+      const candidates1 = response1.candidates || [];
 
-      if (candidates.length === 0 || !candidates[0].content?.parts) {
-        // No function call, return text response
-        const text = candidates[0]?.content?.parts?.[0]?.text || 'I\'m not sure how to help with that.';
-        return { responseText: text };
+      if (candidates1.length === 0 || !candidates1[0].content?.parts) {
+        throw new Error('No function call received despite mode: ANY');
       }
 
-      let functionCall: { name: string; args: Record<string, any> } | undefined;
+      // Extract ALL function calls (support parallel function calling)
+      const functionCalls: Array<{ name: string; args: Record<string, any> }> = [];
+      const functionCallParts: any[] = [];
 
-      for (const part of candidates[0].content.parts) {
+      for (const part of candidates1[0].content.parts) {
         if (part.functionCall) {
-          functionCall = {
+          functionCalls.push({
             name: part.functionCall.name,
             args: part.functionCall.args as Record<string, any>
-          };
-          break;
+          });
+          functionCallParts.push(part);  // Save original parts for history
         }
       }
 
-      if (!functionCall) {
-        // No function call, return text
-        const text = candidates[0]?.content?.parts?.[0]?.text || 'I\'m not sure how to help with that.';
-        return { responseText: text };
+      if (functionCalls.length === 0) {
+        throw new Error('No function call found in response despite mode: ANY');
       }
 
       console.log(JSON.stringify({
         severity: 'DEBUG',
-        message: 'Function call extracted',
-        functionName: functionCall.name,
-        args: functionCall.args
+        message: 'Function calls extracted from stateless call',
+        count: functionCalls.length,
+        functions: functionCalls.map(fc => fc.name)
       }));
 
-      // Step 2: Execute function
+      // ============================================================
+      // STEP 2: Execute ALL functions
+      // ============================================================
+
       const toolStart = Date.now();
-      const functionResult = await executeFunction(functionCall.name, functionCall.args);
-      const toolExecutionMs = Date.now() - toolStart;
+      const functionResults: Array<{ name: string; result: any }> = [];
 
-      // Log function result details
-      const resultSize = JSON.stringify(functionResult).length;
-      console.log(JSON.stringify({
-        severity: 'DEBUG',
-        message: 'Function executed',
-        functionName: functionCall.name,
-        durationMs: toolExecutionMs,
-        resultSize,
-        resultType: typeof functionResult,
-        resultKeys: typeof functionResult === 'object' && functionResult ? Object.keys(functionResult) : []
-      }));
+      for (const fc of functionCalls) {
+        const result = await executeFunction(fc.name, fc.args);
+        functionResults.push({ name: fc.name, result });
 
-      // Step 3: Send function result back to chat and handle multiple function call rounds
-      let currentResult = await chat.sendMessage([{
-        functionResponse: {
-          name: functionCall.name,
-          response: functionResult
-        }
-      }]);
-
-      console.log(JSON.stringify({
-        severity: 'DEBUG',
-        message: 'Received response after sending functionResponse',
-        hasCandidates: !!(currentResult.response.candidates && currentResult.response.candidates.length > 0)
-      }));
-
-      let roundCount = 1;
-      const maxRounds = 3;  // Prevent infinite loops
-
-      // Keep handling function calls until Gemini returns text
-      while (roundCount < maxRounds) {
-        const response = currentResult.response;
-        const candidates = response.candidates || [];
-
-        // Check if Gemini returned another function call
-        let nextFunctionCall: { name: string; args: Record<string, any> } | undefined;
-
-        if (candidates.length > 0 && candidates[0].content?.parts) {
-          for (const part of candidates[0].content.parts) {
-            if (part.functionCall) {
-              nextFunctionCall = {
-                name: part.functionCall.name,
-                args: part.functionCall.args as Record<string, any>
-              };
-              break;
-            }
-          }
-        }
-
-        if (!nextFunctionCall) {
-          // No more function calls, we got text!
-          let responseText = candidates[0]?.content?.parts?.[0]?.text || '';
-
-          // Log response details
-          const logData: any = {
-            severity: responseText.length === 0 ? 'WARNING' : 'INFO',
-            message: 'Final text response received',
-            rounds: roundCount,
-            textLength: responseText.length,
-            responsePreview: responseText.substring(0, 200) // First 200 chars for debugging
-          };
-
-          // WORKAROUND: If empty response but we have function result, retry with explicit prompt
-          if (responseText.length === 0 && functionResult) {
-            console.log(JSON.stringify({
-              ...logData,
-              message: 'Empty response detected, falling back to new chat session with fake history'
-            }));
-
-            try {
-              // FALLBACK: Create a NEW chat session with functionResponse in history
-              const fallbackModel = this.vertexAI.getGenerativeModel({
-                model: modelToUse,
-                systemInstruction: input.systemInstruction,
-                generationConfig: {
-                  temperature: 1,
-                  topP: 0.95
-                }
-              });
-
-              const fallbackChat = fallbackModel.startChat({
-                history: [
-                  {
-                    role: 'user',
-                    parts: [{ text: input.userMessage }]
-                  },
-                  {
-                    role: 'model',
-                    parts: [{
-                      functionCall: {
-                        name: functionCall.name,
-                        args: functionCall.args
-                      }
-                    }]
-                  },
-                  {
-                    role: 'function',
-                    parts: [{
-                      functionResponse: {
-                        name: functionCall.name,
-                        response: functionResult
-                      }
-                    }]
-                  }
-                ]
-              });
-
-              // Ask for response in new session
-              const fallbackResult = await fallbackChat.sendMessage(
-                'Please provide a natural language response based on this data.'
-              );
-              responseText = fallbackResult.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-              console.log(JSON.stringify({
-                severity: responseText.length > 0 ? 'INFO' : 'WARNING',
-                message: 'Fallback response received',
-                fallbackTextLength: responseText.length,
-                fallbackSuccessful: responseText.length > 0
-              }));
-            } catch (fallbackError: any) {
-              console.log(JSON.stringify({
-                severity: 'ERROR',
-                message: 'Fallback failed',
-                error: fallbackError.message
-              }));
-            }
-          }
-
-          console.log(JSON.stringify(logData));
-
-          return {
-            functionCall,
-            functionResult,
-            responseText,
-            toolExecutionMs
-          };
-        }
-
-        // Gemini wants to call another function
-        console.log(JSON.stringify({
-          severity: 'INFO',
-          message: 'Gemini requested another function call',
-          round: roundCount + 1,
-          functionName: nextFunctionCall.name
-        }));
-
-        // Execute the next function
-        const nextToolStart = Date.now();
-        const nextFunctionResult = await executeFunction(nextFunctionCall.name, nextFunctionCall.args);
-        const nextToolDuration = Date.now() - nextToolStart;
-
-        const nextResultSize = JSON.stringify(nextFunctionResult).length;
+        const resultSize = JSON.stringify(result).length;
         console.log(JSON.stringify({
           severity: 'DEBUG',
-          message: 'Additional function executed',
-          functionName: nextFunctionCall.name,
-          durationMs: nextToolDuration,
-          resultSize: nextResultSize
+          message: 'Function executed',
+          functionName: fc.name,
+          resultSize,
+          resultType: typeof result,
+          resultKeys: typeof result === 'object' && result ? Object.keys(result) : []
         }));
-
-        // Send the next function result
-        currentResult = await chat.sendMessage([{
-          functionResponse: {
-            name: nextFunctionCall.name,
-            response: nextFunctionResult
-          }
-        }]);
-
-        roundCount++;
       }
 
-      // Reached max rounds without getting text
-      console.warn('Reached maximum function call rounds without text response');
+      const toolExecutionMs = Date.now() - toolStart;
+
+      // ============================================================
+      // STEP 3: Get final text response with new chat session (stateful, mode: AUTO)
+      // ============================================================
+
+      // Manually construct history for final response call
+      const historyForFinalResponse = [
+        ...history,
+        { role: 'user', parts: [{ text: input.userMessage }] },
+        { role: 'model', parts: functionCallParts }  // Model's function call(s)
+      ];
+
+      // Create model config WITHOUT mode: ANY (defaults to AUTO)
+      const modelConfigForFinal: any = {
+        model: modelToUse,
+        systemInstruction: {
+          parts: [{ text: input.systemInstruction }]
+        },
+        generationConfig: {
+          temperature: 1,
+          topP: 0.95,
+          thinkingConfig: {
+            thinkingBudget: 1024,
+            includeThoughts: true
+          }
+        }
+      };
+
+      if (functionDeclarations.length > 0) {
+        modelConfigForFinal.tools = [{ functionDeclarations }];
+        // NO toolConfig = defaults to mode: AUTO
+      }
+
+      const modelForFinalResponse = this.vertexAI.getGenerativeModel(modelConfigForFinal);
+      const chatForFinalResponse = modelForFinalResponse.startChat({
+        history: historyForFinalResponse
+      });
+
+      console.log(JSON.stringify({
+        severity: 'DEBUG',
+        message: 'Starting new chat session for final response (mode: AUTO)',
+        location: this.location
+      }));
+
+      // Send function results to get final text
+      const functionResponseParts = functionResults.map(fr => ({
+        functionResponse: {
+          name: fr.name,
+          response: fr.result
+        }
+      }));
+
+      const apiCall2Start = Date.now();
+      const result2 = await chatForFinalResponse.sendMessage(functionResponseParts);
+      const apiCall2Duration = Date.now() - apiCall2Start;
+
+      console.log(JSON.stringify({
+        severity: 'INFO',
+        message: 'Final response received',
+        model: modelToUse,
+        durationMs: apiCall2Duration,
+        location: this.location
+      }));
+
+      // Extract thinking and answer from final response
+      const response2 = result2.response;
+      const candidates2 = response2.candidates || [];
+
+      const { thinkingSummaries, answerText } = this.extractThinkingAndAnswer(candidates2);
+
+      // Log thinking summaries for test analysis
+      if (thinkingSummaries.length > 0) {
+        console.log(JSON.stringify({
+          severity: 'DEBUG',
+          message: 'Gemini thinking summary captured (hybrid approach)',
+          thinkingCount: thinkingSummaries.length,
+          thinkingPreview: thinkingSummaries[0].substring(0, 200),
+          thoughtsTokenCount: (response2.usageMetadata as any)?.thoughtsTokenCount || 0
+        }));
+      }
+
+      // Log response details
+      const logData: any = {
+        severity: answerText.length === 0 ? 'WARNING' : 'INFO',
+        message: 'Final text response received (hybrid approach)',
+        textLength: answerText.length,
+        responsePreview: answerText.substring(0, 200),
+        hasThinking: thinkingSummaries.length > 0
+      };
+
+      console.log(JSON.stringify(logData));
+
       return {
-        functionCall,
-        functionResult,
-        responseText: 'I analyzed the data but encountered an issue generating the final response. Please try rephrasing your question.',
+        functionCall: functionCalls[0],
+        functionResult: functionResults[0].result,
+        responseText: answerText,
         toolExecutionMs
       };
+
     } catch (error: any) {
-      console.error('Vertex AI continuous chat error', { error: error.message });
+      console.error('Vertex AI hybrid function calling error', { error: error.message });
 
       // Check for rate limit
       if (error.message?.includes('quota') || error.message?.includes('rate limit')) {
@@ -789,8 +741,43 @@ export class GeminiClient {
         return await this.generateWithFunctionCalling(input, executeFunction, modelOverride);
       }
 
-      throw new Error(`Vertex AI continuous chat error: ${error.message}`);
+      throw new Error(`Vertex AI hybrid function calling error: ${error.message}`);
     }
+  }
+
+  /**
+   * Extract thinking summaries and final answer from response parts
+   * With thinking mode enabled, response.candidates[0].content.parts contains:
+   * - Parts with .thought property = thinking summaries (for logging)
+   * - Parts without .thought = final answer (for users)
+   */
+  private extractThinkingAndAnswer(candidates: any[]): {
+    thinkingSummaries: string[];
+    answerText: string;
+  } {
+    const thinkingSummaries: string[] = [];
+    const answerParts: string[] = [];
+
+    if (candidates.length === 0 || !candidates[0].content?.parts) {
+      return { thinkingSummaries, answerText: '' };
+    }
+
+    for (const part of candidates[0].content.parts) {
+      if (part.thought) {
+        // This part contains thinking summary
+        if (part.text) {
+          thinkingSummaries.push(part.text);
+        }
+      } else if (part.text) {
+        // This part contains final answer
+        answerParts.push(part.text);
+      }
+    }
+
+    return {
+      thinkingSummaries,
+      answerText: answerParts.join('')
+    };
   }
 
   private sleep(ms: number): Promise<void> {

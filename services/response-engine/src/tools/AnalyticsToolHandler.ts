@@ -36,6 +36,15 @@ export class AnalyticsToolHandler {
   async execute(functionName: string, args: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
 
+    // Log function call with full parameters
+    console.log(JSON.stringify({
+      severity: 'DEBUG',
+      message: 'AnalyticsToolHandler.execute() called',
+      functionName,
+      args,
+      customerId: this.customerId
+    }));
+
     try {
       let result: ToolResult;
 
@@ -73,21 +82,37 @@ export class AnalyticsToolHandler {
           );
       }
 
+      // Log successful execution with result summary
       console.log(JSON.stringify({
         severity: 'INFO',
-        message: 'Intent function executed',
+        message: 'Intent function executed successfully',
         function: functionName,
         executionTimeMs: Date.now() - startTime,
-        rowCount: result.totalRows
+        rowCount: result.totalRows,
+        isEmpty: result.totalRows === 0,
+        hasData: result.totalRows > 0
       }));
 
       return result;
     } catch (error: any) {
+      // Log execution error with full details
+      console.error(JSON.stringify({
+        severity: 'ERROR',
+        message: 'Intent function execution failed',
+        function: functionName,
+        args,
+        errorType: error.constructor?.name || 'Unknown',
+        errorMessage: error.message || String(error),
+        errorCode: error.code,
+        executionTimeMs: Date.now() - startTime
+      }));
+
       // Re-throw if already a typed error
       if (error instanceof UserInputError || error instanceof TransientError) {
         throw error;
       }
 
+      // Wrap untyped errors
       console.error(`Error executing ${functionName}:`, error);
       throw error;
     }
@@ -382,6 +407,17 @@ export class AnalyticsToolHandler {
       order_by_field: 'date',
       order_direction: 'ASC'
     });
+
+    // Check for empty results
+    if (!dailyData.rows || dailyData.rows.length === 0) {
+      const categoryDesc = primaryCategory || subcategory ? ` for ${primaryCategory || subcategory}` : '';
+      throw new UserInputError(
+        `No sales data found${categoryDesc} for the period ${args.startDate} to ${args.endDate}`,
+        UserInputErrorCodes.NO_DATA_FOUND,
+        { startDate: args.startDate, endDate: args.endDate, category: args.category },
+        ['Try a different date range with available data', 'Check if data has been loaded for this period', 'Try removing category filters']
+      );
+    }
 
     // Aggregate by day type
     const aggregated = this.aggregateByDayType(dailyData.rows, args.comparison);
