@@ -13,7 +13,6 @@ services:
       - ENVIRONMENT=development
       - LOG_LEVEL=debug
       - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
-      - CONVERSATION_MANAGER_URL=http://conversation-manager:8080
       - BQ_DATASET_ANALYTICS=${BQ_DATASET_ANALYTICS:-restaurant_analytics}
       - BQ_DATASET_INSIGHTS=${BQ_DATASET_INSIGHTS:-insights}
       - BQ_DATASET_CHAT_HISTORY=${BQ_DATASET_CHAT_HISTORY:-chat_history}
@@ -21,28 +20,6 @@ services:
       - PORT=8080
     volumes:
       - ./services/response-engine/src:/app/src
-    depends_on:
-      - conversation-manager
-    networks:
-      - fdsanalytics
-
-  conversation-manager:
-    build:
-      context: ./services/conversation-manager
-      dockerfile: Dockerfile
-    ports:
-      - "3002:8080"
-    environment:
-      - PROJECT_ID=${PROJECT_ID:-fdsanalytics}
-      - REGION=${REGION:-us-central1}
-      - ENVIRONMENT=development
-      - LOG_LEVEL=debug
-      - GEMINI_SECRET_NAME=${GEMINI_SECRET_NAME:-GEMINI_API_KEY}
-      - BQ_DATASET_CHAT_HISTORY=${BQ_DATASET_CHAT_HISTORY:-chat_history}
-      - DEFAULT_TIMEZONE=${DEFAULT_TIMEZONE:-America/Chicago}
-      - PORT=8080
-    volumes:
-      - ./services/conversation-manager/src:/app/src
     networks:
       - fdsanalytics
 

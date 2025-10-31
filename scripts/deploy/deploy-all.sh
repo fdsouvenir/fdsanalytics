@@ -36,9 +36,8 @@ echo -e "${YELLOW}Region: ${REGION}${NC}"
 echo ""
 echo -e "${YELLOW}This will deploy services in the following order:${NC}"
 echo "  1. BigQuery Stored Procedures"
-echo "  2. Conversation Manager"
-echo "  3. Response Engine"
-echo "  4. Gmail Ingestion"
+echo "  2. Response Engine"
+echo "  3. Gmail Ingestion"
 echo ""
 echo -e "${YELLOW}Continue? (y/n)${NC}"
 read -r RESPONSE
@@ -72,29 +71,12 @@ deploy_service() {
 # 1. Deploy BigQuery stored procedures
 deploy_service "BigQuery Stored Procedures" "deploy-stored-procedures.sh" || true
 
-# 2. Deploy Conversation Manager (no dependencies)
-deploy_service "Conversation Manager" "deploy-conversation-manager.sh" || {
-  echo -e "${RED}Critical: Conversation Manager failed to deploy${NC}"
-  echo -e "${YELLOW}Continuing with other services...${NC}"
-}
-
-# Grant service-to-service IAM permissions
-echo -e "${BLUE}==== Granting Service-to-Service Permissions ====${NC}"
-echo -e "${GREEN}Allowing Response Engine to invoke Conversation Manager...${NC}"
-gcloud run services add-iam-policy-binding conversation-manager \
-  --region="${REGION}" \
-  --member="serviceAccount:response-engine@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/run.invoker" \
-  --project="${PROJECT_ID}" \
-  --quiet 2>/dev/null || echo -e "${YELLOW}Warning: Failed to grant Conversation Manager invoker role${NC}"
-echo ""
-
-# 3. Deploy Response Engine (depends on Conversation Manager)
+# 2. Deploy Response Engine (Tool Server)
 deploy_service "Response Engine" "deploy-response-engine.sh" || {
   echo -e "${RED}Critical: Response Engine failed to deploy${NC}"
 }
 
-# 4. Deploy Gmail Ingestion (independent)
+# 3. Deploy Gmail Ingestion (independent)
 deploy_service "Gmail Ingestion" "deploy-gmail-ingestion.sh" || {
   echo -e "${YELLOW}Warning: Gmail Ingestion failed to deploy${NC}"
 }
@@ -131,13 +113,8 @@ RESPONSE_ENGINE_URL=$(gcloud run services describe response-engine \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --format='value(status.url)' 2>/dev/null || echo "Not deployed")
-echo -e "${GREEN}Response Engine: ${RESPONSE_ENGINE_URL}${NC}"
-
-CONVERSATION_MANAGER_URL=$(gcloud run services describe conversation-manager \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --format='value(status.url)' 2>/dev/null || echo "Not deployed")
-echo -e "${GREEN}Conversation Manager (internal): ${CONVERSATION_MANAGER_URL}${NC}"
+echo -e "${GREEN}Response Engine (Tool Server): ${RESPONSE_ENGINE_URL}${NC}"
+echo -e "${GREEN}  - Execute Tool Endpoint: ${RESPONSE_ENGINE_URL}/execute-tool${NC}"
 
 echo ""
 echo -e "${BLUE}============================================${NC}"
@@ -145,6 +122,6 @@ echo -e "${GREEN}All deployments complete!${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Configure Google Chat webhook: ${RESPONSE_ENGINE_URL}/webhook"
+echo "  1. Configure Vertex AI Agent to call: ${RESPONSE_ENGINE_URL}/execute-tool"
 echo "  2. Test ingestion: ./scripts/utilities/test-ingestion.sh"
 echo "  3. Check health: ./scripts/utilities/health-check-all.sh"
