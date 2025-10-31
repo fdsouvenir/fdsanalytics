@@ -3,6 +3,7 @@
 
 import { BigQuery } from '@google-cloud/bigquery';
 import { UserInputError, UserInputErrorCodes, TransientError, TransientErrorCodes } from '@fdsanalytics/shared';
+import { TenantConfigService } from '../services/TenantConfigService';
 
 export interface ToolResult {
   rows: any[];
@@ -20,9 +21,9 @@ export class AnalyticsToolHandler {
   private firstDateCache: string | null = null;
 
   constructor(
-    projectId: string = 'fdsanalytics',
-    dataset: string = 'restaurant_analytics',
-    customerId: string = 'senso-sushi'
+    projectId: string,
+    dataset: string,
+    customerId: string
   ) {
     this.projectId = projectId;
     this.dataset = dataset;
@@ -31,9 +32,32 @@ export class AnalyticsToolHandler {
   }
 
   /**
-   * Execute an intent function
+   * Execute an intent function (static entry point for Tool Server)
+   *
+   * @param tenantId - Tenant identifier (e.g., "senso-sushi", "company-a.com")
+   * @param functionName - Intent function name (e.g., "show_daily_sales")
+   * @param args - Function arguments
+   * @returns Tool execution result with rows and metadata
    */
-  async execute(functionName: string, args: Record<string, any>): Promise<ToolResult> {
+  static async execute(tenantId: string, functionName: string, args: Record<string, any>): Promise<ToolResult> {
+    // Get tenant configuration
+    const tenantConfig = await TenantConfigService.getConfig(tenantId);
+
+    // Create handler instance with tenant-specific config
+    const handler = new AnalyticsToolHandler(
+      tenantConfig.projectId,
+      tenantConfig.datasetAnalytics,
+      tenantConfig.customerId
+    );
+
+    // Execute the function via instance method
+    return handler.executeInstance(functionName, args);
+  }
+
+  /**
+   * Execute an intent function (instance method)
+   */
+  private async executeInstance(functionName: string, args: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
 
     // Log function call with full parameters

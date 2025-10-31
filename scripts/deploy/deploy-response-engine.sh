@@ -51,27 +51,11 @@ docker buildx build --platform linux/amd64 -t "${IMAGE}" --push -f services/${SE
 
 echo -e "${GREEN}Image built and pushed successfully${NC}"
 
-# Get Response Engine and Conversation Manager URLs
-echo -e "${GREEN}Getting service URLs...${NC}"
-RESPONSE_ENGINE_URL=$(gcloud run services describe response-engine \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --format='value(status.url)' 2>/dev/null || echo "")
-
-CONVERSATION_MANAGER_URL=$(gcloud run services describe conversation-manager \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --format='value(status.url)' 2>/dev/null || echo "")
-
-if [ -z "${RESPONSE_ENGINE_URL}" ] || [ -z "${CONVERSATION_MANAGER_URL}" ]; then
-  echo -e "${YELLOW}Warning: Dependency services not found. Make sure to deploy them first.${NC}"
-  echo -e "${YELLOW}Using placeholder URLs for now.${NC}"
-  RESPONSE_ENGINE_URL="https://response-engine-placeholder"
-  CONVERSATION_MANAGER_URL="https://conversation-manager-placeholder"
-fi
+# Tool Server Architecture - No dependencies on other services
+echo -e "${GREEN}Preparing Tool Server deployment...${NC}"
 
 # Deploy to Cloud Run
-echo -e "${GREEN}Deploying to Cloud Run...${NC}"
+echo -e "${GREEN}Deploying to Cloud Run (Tool Server)...${NC}"
 gcloud run deploy "${SERVICE_NAME}" \
   --image="${IMAGE}" \
   --region="${REGION}" \
@@ -83,14 +67,26 @@ gcloud run deploy "${SERVICE_NAME}" \
   --min-instances=1 \
   --max-instances=10 \
   --concurrency=10 \
-  --ingress=all \
-  --allow-unauthenticated \
-  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,GEMINI_SECRET_NAME=GEMINI_API_KEY,DEFAULT_TIMEZONE=America/Chicago,BQ_DATASET_ANALYTICS=restaurant_analytics,BQ_DATASET_INSIGHTS=insights,BQ_DATASET_CHAT_HISTORY=chat_history,CONVERSATION_MANAGER_URL=${CONVERSATION_MANAGER_URL},ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
-  --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+  --ingress=internal-and-cloud-load-balancing \
+  --no-allow-unauthenticated \
+  --set-env-vars="PROJECT_ID=${PROJECT_ID},REGION=${REGION},ENVIRONMENT=production,LOG_LEVEL=info,DEFAULT_TIMEZONE=America/Chicago,BQ_DATASET_ANALYTICS=restaurant_analytics,BQ_DATASET_INSIGHTS=insights,ENABLE_CHARTS=true,MAX_CHART_DATAPOINTS=100" \
   --project="${PROJECT_ID}" || {
   echo -e "${RED}Deployment failed${NC}"
   exit 1
 }
+
+# Grant Vertex AI Agent service account permission to invoke this service
+echo -e "${GREEN}Granting Vertex AI Agent invoker permission...${NC}"
+VERTEX_AI_SA="vtx-agent-fds-tool-invoker@${PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
+  --region="${REGION}" \
+  --member="serviceAccount:${VERTEX_AI_SA}" \
+  --role="roles/run.invoker" \
+  --project="${PROJECT_ID}" \
+  --quiet 2>/dev/null || echo -e "${YELLOW}Warning: Failed to grant invoker role to ${VERTEX_AI_SA}${NC}"
+
+echo -e "${GREEN}IAM permissions configured${NC}"
 
 # Get service URL
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
@@ -114,6 +110,11 @@ echo -e "${BLUE}==========================================${NC}"
 echo ""
 echo -e "${GREEN}Service URL: ${SERVICE_URL}${NC}"
 echo -e "${GREEN}Health check: ${SERVICE_URL}/health${NC}"
+echo -e "${GREEN}Tool endpoint: ${SERVICE_URL}/execute-tool${NC}"
 echo ""
-echo -e "${YELLOW}Configure this URL in Google Chat API settings:${NC}"
-echo "${SERVICE_URL}/webhook"
+echo -e "${YELLOW}Next steps:${NC}"
+echo "  1. Configure Vertex AI Agent Builder to call: ${SERVICE_URL}/execute-tool"
+echo "  2. Ensure Vertex AI Agent uses service account: ${VERTEX_AI_SA}"
+echo "  3. Test with: ./scripts/testing/test-all-intent-functions.sh"
+echo ""
+echo -e "${YELLOW}Note: This is an IAM-protected endpoint (no public access)${NC}"
