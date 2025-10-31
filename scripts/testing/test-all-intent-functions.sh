@@ -114,6 +114,10 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 RUN_DIR="$OUTPUT_DIR/run-$TIMESTAMP"
 mkdir -p "$RUN_DIR"
 
+# Create unique test run ID with nanosecond precision
+# This ensures thread IDs are globally unique across all test runs
+TEST_RUN_ID=$(date +%s%N)  # Unix timestamp + nanoseconds
+
 # Initialize markdown report
 REPORT_FILE="$RUN_DIR/TEST_REPORT.md"
 
@@ -174,9 +178,10 @@ EOF
 
     # Determine thread ID based on test mode
     # - isolated mode: unique thread per test (clears history)
+    #   Uses TEST_RUN_ID to ensure global uniqueness across all test runs
     # - contextual mode: shared thread (maintains conversation)
     if [ "$TEST_MODE" = "isolated" ]; then
-        THREAD_ID="test-thread-isolated-${test_id}-$(date +%s)"
+        THREAD_ID="test-run-${TEST_RUN_ID}-thread-${test_id}"
     else
         THREAD_ID="test-thread-contextual-shared"
     fi
@@ -273,8 +278,8 @@ EOF
             cat >> "$REPORT_FILE" <<EOF
 **Tool Calls Made ($tool_calls):**
 EOF
-            # Parse and display each tool call
-            echo "$tool_calls_summary" | jq -r '.[] | "- \(.tool) (params: \(.params | join(", ")))"' >> "$REPORT_FILE"
+            # Parse and display each tool call with full params and result
+            echo "$tool_calls_summary" | jq -r '.[] | "- \(.tool)\n  Params: \(.params | tojson)\n  Result: \(.result | tojson)"' >> "$REPORT_FILE"
             cat >> "$REPORT_FILE" <<EOF
 
 EOF

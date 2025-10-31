@@ -155,7 +155,8 @@ export class ResponseEngine {
         toolCallsCount: result.toolCallsMade.length,
         toolCallsSummary: result.toolCallsMade.map(tc => ({
           tool: tc.toolName,
-          params: Object.keys(tc.parameters || {})
+          params: tc.parameters,
+          result: tc.result
         })),
         chartGenerated: result.chartUrl !== null
       }));
