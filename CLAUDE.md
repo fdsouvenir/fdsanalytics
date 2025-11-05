@@ -53,6 +53,51 @@ Gmail API → Gmail Ingestion → BigQuery (restaurant_analytics)
 - AnalyticsToolHandler validates parameters and tenant isolation
 - BigQuery stored procedures prevent SQL injection
 
+### Hybrid ADK Agent Architecture (November 2025)
+
+**100% CLI-Based Deployment - Zero GUI Interaction**
+
+The project uses a hybrid approach combining ADK (Python) for orchestration with the existing Node.js Tool Server:
+
+```
+ADK Agent (Python - ~150 lines)
+  ├─ Conversation Management
+  ├─ Function Calling Orchestration
+  ├─ Session/Memory Handling
+  └─ OpenAPI Tool Integration
+       ↓ HTTP (OIDC Auth)
+Node.js Tool Server (Unchanged)
+  ├─ 8 Intent Functions
+  ├─ BigQuery Integration
+  ├─ Multi-Tenant Config
+  └─ Chart Generation
+```
+
+**Key Benefits:**
+- **100% Scriptable:** `./scripts/deploy/deploy-agent.sh` (zero GUI)
+- **Version Controlled:** All agent code in Git
+- **Claude Code Friendly:** Can read/write all files
+- **Minimal Python:** ~150 lines total (easy to maintain)
+- **Keep Node.js:** Existing Tool Server unchanged
+
+**Files:**
+- `agent/agent.py` - Main agent definition (50 lines)
+- `agent/deploy.py` - Deployment script (40 lines)
+- `agent/test_agent.py` - Test suite (150 lines)
+- `vertex-ai-tools-config.yaml` - OpenAPI spec for all 8 functions
+
+**Deployment:**
+```bash
+# One-time setup
+./scripts/deploy/setup-agent-infrastructure.sh
+
+# Deploy agent
+./scripts/deploy/deploy-agent.sh
+
+# Test agent
+cd agent && python test_agent.py
+```
+
 ## Common Development Commands
 
 ### Local Development
@@ -109,22 +154,73 @@ gcloud config set project fdsanalytics
 # Create Vertex AI service account (one-time setup)
 ./scripts/deploy/create-vertex-ai-service-account.sh
 
-# Deploy all services in correct order
+# Setup agent infrastructure (one-time)
+./scripts/deploy/setup-agent-infrastructure.sh
+
+# Deploy all services in correct order (Tool Server + Agent)
 ./scripts/deploy/deploy-all.sh
 
 # Deploy individual services
 ./scripts/deploy/deploy-response-engine.sh  # Tool Server
 ./scripts/deploy/deploy-gmail-ingestion.sh
+./scripts/deploy/deploy-agent.sh            # Vertex AI Agent (ADK)
 
 # Deploy BigQuery stored procedures
 ./scripts/deploy/deploy-stored-procedures.sh
 
-# Health check
+# Health check Tool Server
 curl https://response-engine-XXXXXXXXXX-uc.a.run.app/health
+
+# Test Agent
+cd agent && python test_agent.py
 
 # View logs
 gcloud run services logs read response-engine --region us-central1 --limit 50
+
+# View agent logs
+gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine"' \
+  --project=fdsanalytics --limit=50
 ```
+
+### MCP Server Integration
+
+**Gemini API Documentation MCP Server** - Provides Claude Code with integrated access to official Gemini API documentation.
+
+**Purpose:**
+- Instant access to Gemini API docs while working on Vertex AI integration code
+- No context-switching to external browser needed
+- Helps validate API usage patterns and stay current with model capabilities
+
+**Installation (One-Time Setup):**
+```bash
+# Add the MCP server using the official CLI command
+claude mcp add --transport stdio --scope project gemini-docs -- uvx --from git+https://github.com/philschmid/gemini-api-docs-mcp gemini-docs-mcp
+
+# Verify it was added
+claude mcp get gemini-docs
+```
+
+**Configuration Details:**
+- Location: `.mcp.json` at project root (auto-created by `claude mcp add`)
+- Scope: Project-level (can be committed to git and shared with team)
+- Database: `~/.mcp/gemini-api-docs/database.db` (auto-created on first use, 3.8MB)
+- Transport: stdio with `uvx` (no manual installation required)
+
+**Available MCP Tools:**
+- `search_documentation(queries)` - Full-text search across Gemini API docs
+- `get_capability_page(capability)` - Retrieve specific documentation pages
+- `get_current_model()` - Get latest Gemini model information
+
+**When to Use:**
+- Verifying Gemini 2.5 Flash capabilities and parameters
+- Looking up function calling patterns and best practices
+- Checking model specifications (token limits, thinking mode, etc.)
+- Validating Vertex AI Agent Builder integration patterns
+
+**Verification:**
+- Command line: `claude mcp get gemini-docs` (should show "✓ Connected")
+- In Claude Code: Use `/mcp` command to see available MCP tools
+- No restart required after adding via CLI command
 
 ## Critical Design Patterns
 

@@ -36,8 +36,9 @@ echo -e "${YELLOW}Region: ${REGION}${NC}"
 echo ""
 echo -e "${YELLOW}This will deploy services in the following order:${NC}"
 echo "  1. BigQuery Stored Procedures"
-echo "  2. Response Engine"
+echo "  2. Response Engine (Tool Server)"
 echo "  3. Gmail Ingestion"
+echo "  4. Vertex AI Agent (ADK)"
 echo ""
 echo -e "${YELLOW}Continue? (y/n)${NC}"
 read -r RESPONSE
@@ -81,6 +82,16 @@ deploy_service "Gmail Ingestion" "deploy-gmail-ingestion.sh" || {
   echo -e "${YELLOW}Warning: Gmail Ingestion failed to deploy${NC}"
 }
 
+# 4. Deploy Vertex AI Agent (requires Response Engine)
+if [ ${#FAILED_SERVICES[@]} -eq 0 ] || [[ ! " ${FAILED_SERVICES[@]} " =~ " Response Engine " ]]; then
+  deploy_service "Vertex AI Agent" "deploy-agent.sh" || {
+    echo -e "${YELLOW}Warning: Vertex AI Agent failed to deploy${NC}"
+  }
+else
+  echo -e "${YELLOW}Skipping Vertex AI Agent deployment (Response Engine failed)${NC}"
+  FAILED_SERVICES+=("Vertex AI Agent")
+fi
+
 # Summary
 echo ""
 echo -e "${BLUE}============================================${NC}"
@@ -116,12 +127,21 @@ RESPONSE_ENGINE_URL=$(gcloud run services describe response-engine \
 echo -e "${GREEN}Response Engine (Tool Server): ${RESPONSE_ENGINE_URL}${NC}"
 echo -e "${GREEN}  - Execute Tool Endpoint: ${RESPONSE_ENGINE_URL}/execute-tool${NC}"
 
+# Check if agent was deployed
+if [ -f "${SCRIPT_DIR}/../../agent/.agent_resource" ]; then
+  AGENT_RESOURCE=$(cat "${SCRIPT_DIR}/../../agent/.agent_resource")
+  echo ""
+  echo -e "${GREEN}Vertex AI Agent:${NC}"
+  echo -e "${GREEN}  - Resource: ${AGENT_RESOURCE}${NC}"
+  echo -e "${GREEN}  - Console: https://console.cloud.google.com/vertex-ai/agents?project=${PROJECT_ID}${NC}"
+fi
+
 echo ""
 echo -e "${BLUE}============================================${NC}"
 echo -e "${GREEN}All deployments complete!${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Configure Vertex AI Agent to call: ${RESPONSE_ENGINE_URL}/execute-tool"
+echo "  1. Test the agent: cd agent && python3 test_agent.py"
 echo "  2. Test ingestion: ./scripts/utilities/test-ingestion.sh"
 echo "  3. Check health: ./scripts/utilities/health-check-all.sh"

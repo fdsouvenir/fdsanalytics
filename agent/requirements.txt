@@ -1,0 +1,12 @@
+# FDS Analytics Agent - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Vertex AI SDK with ADK and Agent Engines support
+google-cloud-aiplatform[adk,agent_engines]>=1.112
+
+# YAML parsing for OpenAPI spec
+pyyaml>=6.0
+
+# Optional: Development and testing dependencies
+# pytest>=7.0  # Uncomment for testing
+# python-dotenv>=1.0  # Uncomment for local .env file support

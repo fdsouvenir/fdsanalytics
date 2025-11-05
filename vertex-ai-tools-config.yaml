@@ -1,0 +1,692 @@
+openapi: 3.0.3
+info:
+  title: FDS Analytics Tool Server
+  description: |
+    Multi-tenant restaurant analytics Tool Server API for Vertex AI Agent Builder.
+
+    Provides 8 intent functions for querying sales data, trends, and insights.
+    Supports both Vertex AI Agent Builder Console and ADK (Agent Development Kit).
+  version: 2.0.0
+  contact:
+    name: FDS Analytics
+    email: fred@fdsconsulting.com
+
+servers:
+  - url: https://response-engine-111874159771.us-central1.run.app
+    description: Production Tool Server (Cloud Run)
+
+security:
+  - oidcAuth: []
+
+components:
+  securitySchemes:
+    oidcAuth:
+      type: openIdConnect
+      description: |
+        IAM-based authentication using OpenID Connect tokens.
+        Vertex AI Extension Service Agent generates OIDC tokens automatically.
+        Service Account: vtx-agent-fds-tool-invoker@fdsanalytics.iam.gserviceaccount.com
+      openIdConnectUrl: https://accounts.google.com/.well-known/openid-configuration
+
+  schemas:
+    ToolRequest:
+      type: object
+      required:
+        - tool_name
+        - tenant_id
+        - args
+      properties:
+        tool_name:
+          type: string
+          description: Name of the intent function to execute
+          enum:
+            - show_daily_sales
+            - show_top_items
+            - show_category_breakdown
+            - get_total_sales
+            - find_peak_day
+            - compare_day_types
+            - track_item_performance
+            - compare_periods
+        tenant_id:
+          type: string
+          description: Tenant identifier (e.g., 'senso-sushi', 'company-a')
+          example: senso-sushi
+          default: senso-sushi
+        args:
+          type: object
+          description: Function-specific arguments (see x-vertex-ai-functions for schemas)
+
+    ToolResponse:
+      type: object
+      required:
+        - status
+        - data
+        - metadata
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+          description: Execution status indicator
+        data:
+          type: array
+          description: Query results from BigQuery (empty array on error)
+          items:
+            type: object
+            additionalProperties: true
+        chartUrl:
+          type: string
+          nullable: true
+          description: URL to generated chart visualization (null if not applicable or failed)
+        metadata:
+          type: object
+          required:
+            - tool_name
+            - row_count
+          properties:
+            tool_name:
+              type: string
+              description: Name of the executed function
+            row_count:
+              type: integer
+              description: Number of rows returned
+            execution_time_ms:
+              type: integer
+              description: Execution time in milliseconds
+            tenant_id:
+              type: string
+              description: Tenant ID from request
+        error:
+          type: object
+          description: Error details (present on error status or warnings)
+          properties:
+            message:
+              type: string
+              description: Human-readable error message
+            code:
+              type: string
+              description: Machine-readable error code
+              enum:
+                - MISSING_REQUIRED_FIELD
+                - INVALID_TOOL_NAME
+                - PARAM_OUT_OF_RANGE
+                - NO_DATA_FOUND
+                - NETWORK_TIMEOUT
+                - INTERNAL_ERROR
+            suggestions:
+              type: array
+              description: Actionable suggestions to resolve the error
+              items:
+                type: string
+
+paths:
+  /execute-tool:
+    post:
+      summary: Execute Analytics Tool
+      description: |
+        Main endpoint for executing any of the 8 analytics intent functions.
+        Validates request, executes tool via BigQuery stored procedures, and returns structured response.
+
+        Response times:
+        - Cached queries (insights): 100-200ms
+        - Uncached queries (stored procedures): 300-800ms
+      operationId: execute_tool
+      security:
+        - oidcAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolRequest'
+            examples:
+              show_daily_sales:
+                summary: Show daily sales for May 2025
+                value:
+                  tool_name: show_daily_sales
+                  tenant_id: senso-sushi
+                  args:
+                    startDate: "2025-05-01"
+                    endDate: "2025-05-31"
+              show_top_items:
+                summary: Top 10 items in July
+                value:
+                  tool_name: show_top_items
+                  tenant_id: senso-sushi
+                  args:
+                    limit: 10
+                    startDate: "2025-07-01"
+                    endDate: "2025-07-31"
+                    category: "(Sushi)"
+              compare_periods:
+                summary: Compare May vs June sales
+                value:
+                  tool_name: compare_periods
+                  tenant_id: senso-sushi
+                  args:
+                    startDate1: "2025-05-01"
+                    endDate1: "2025-05-31"
+                    startDate2: "2025-06-01"
+                    endDate2: "2025-06-30"
+      responses:
+        '200':
+          description: Successful execution (includes both success and business logic errors like NO_DATA_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+              examples:
+                success_with_data:
+                  summary: Successful execution with results
+                  value:
+                    status: success
+                    data:
+                      - report_date: "2025-05-01"
+                        metric_value: "1234.56"
+                      - report_date: "2025-05-02"
+                        metric_value: "2345.67"
+                    chartUrl: "https://quickchart.io/chart?c={...}"
+                    metadata:
+                      tool_name: show_daily_sales
+                      row_count: 2
+                      execution_time_ms: 245
+                      tenant_id: senso-sushi
+                no_data_found:
+                  summary: Query succeeded but no data matched
+                  value:
+                    status: success
+                    data: []
+                    chartUrl: null
+                    metadata:
+                      tool_name: show_daily_sales
+                      row_count: 0
+                      execution_time_ms: 180
+                      tenant_id: senso-sushi
+                    error:
+                      message: "No data found for the specified query"
+                      code: "NO_DATA_FOUND"
+                      suggestions:
+                        - "Try a different date range"
+                        - "Try removing filters"
+        '400':
+          description: Invalid request (missing parameters, invalid tool_name, param out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+              examples:
+                missing_field:
+                  summary: Missing required field
+                  value:
+                    status: error
+                    data: []
+                    metadata:
+                      tool_name: unknown
+                      row_count: 0
+                    error:
+                      message: "Missing required field: tool_name"
+                      code: "MISSING_REQUIRED_FIELD"
+                      suggestions:
+                        - "Provide a tool_name in the request body"
+                param_out_of_range:
+                  summary: Parameter validation failed
+                  value:
+                    status: error
+                    data: []
+                    metadata:
+                      tool_name: show_top_items
+                      row_count: 0
+                    error:
+                      message: "Limit is too large (maximum 1000)"
+                      code: "PARAM_OUT_OF_RANGE"
+                      suggestions:
+                        - "Try a value between 1 and 1000"
+        '401':
+          description: Unauthorized (invalid or missing IAM token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '500':
+          description: Internal server error or query timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+              examples:
+                query_timeout:
+                  summary: BigQuery query timeout
+                  value:
+                    status: error
+                    data: []
+                    metadata:
+                      tool_name: show_daily_sales
+                      row_count: 0
+                    error:
+                      message: "Query took too long to execute"
+                      code: "NETWORK_TIMEOUT"
+                      suggestions:
+                        - "Try a narrower date range"
+                        - "Retry in 5 seconds"
+
+# ============================================================================
+# INTENT FUNCTIONS (8 functions)
+# ============================================================================
+# Below are the 8 analytics functions that Vertex AI Agent can call.
+# Each function has a specific purpose and parameter schema.
+# ============================================================================
+
+x-vertex-ai-functions:
+  - name: show_daily_sales
+    description: |
+      Show sales broken down by day for a date range. Use for queries like:
+      - "sales from May 1 to May 31"
+      - "day to day sales in June"
+      - "daily breakdown for last month"
+      - "beer sales by day in May"
+    parameters:
+      type: object
+      required:
+        - startDate
+        - endDate
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format (e.g., "2025-05-01")
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format (e.g., "2025-05-31")
+          example: "2025-05-31"
+        category:
+          type: string
+          description: |
+            Optional category filter. Examples:
+            - Primary categories: (Beer), (Sushi), (Food), (Liquor), (Wine)
+            - Subcategories: Bottle Beer, Draft Beer, Signature Rolls, Classic Rolls
+          example: "(Beer)"
+    examples:
+      - query: "Show me daily sales for May 2025"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+      - query: "Beer sales by day from May 1 to May 15"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-15"
+          category: "(Beer)"
+
+  - name: show_top_items
+    description: |
+      Show top N best-selling items. Use for queries like:
+      - "top 10 items"
+      - "best sellers in May"
+      - "highest sales items"
+      - "top 5 sushi items"
+    parameters:
+      type: object
+      required:
+        - limit
+        - startDate
+        - endDate
+      properties:
+        limit:
+          type: integer
+          description: Number of top items to show (e.g., 5, 10, 20)
+          minimum: 1
+          maximum: 50
+          example: 10
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+        category:
+          type: string
+          description: Optional category filter (e.g., "(Sushi)", "(Beer)", "Signature Rolls")
+          example: "(Sushi)"
+    examples:
+      - query: "What are the top 10 items?"
+        args:
+          limit: 10
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+      - query: "Show me the top 5 sushi items in May"
+        args:
+          limit: 5
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          category: "(Sushi)"
+
+  - name: show_category_breakdown
+    description: |
+      Show sales broken down by category. Use for queries like:
+      - "sales by category"
+      - "category breakdown"
+      - "which categories sold most"
+      - "category performance in May"
+    parameters:
+      type: object
+      required:
+        - startDate
+        - endDate
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+        includeBeer:
+          type: boolean
+          description: Whether to include beer categories (default true)
+          default: true
+          example: true
+    examples:
+      - query: "Show me sales by category for May"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+      - query: "Category breakdown without beer"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          includeBeer: false
+
+  - name: get_total_sales
+    description: |
+      Get total sales for a period. Use for queries like:
+      - "total sales"
+      - "how much did we make in May"
+      - "revenue for June"
+      - "total beer sales in May"
+    parameters:
+      type: object
+      required:
+        - startDate
+        - endDate
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+        category:
+          type: string
+          description: Optional category filter (e.g., "(Sushi)", "(Beer)", "(Food)")
+          example: "(Beer)"
+    examples:
+      - query: "What were total sales in May?"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+      - query: "Total beer sales in May"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          category: "(Beer)"
+
+  - name: find_peak_day
+    description: |
+      Find the day with highest or lowest sales in a period. Use for queries like:
+      - "best day in May"
+      - "worst day last month"
+      - "highest sales day"
+      - "slowest day in June"
+    parameters:
+      type: object
+      required:
+        - startDate
+        - endDate
+        - type
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+        category:
+          type: string
+          description: Optional category filter (e.g., "(Sushi)", "(Beer)")
+          example: "(Sushi)"
+        type:
+          type: string
+          enum: [highest, lowest]
+          description: Whether to find highest or lowest day
+          example: highest
+    examples:
+      - query: "What was the best day in May?"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          type: highest
+      - query: "Show me the worst sushi sales day in May"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          category: "(Sushi)"
+          type: lowest
+
+  - name: compare_day_types
+    description: |
+      Compare sales between different day types (weekday vs weekend, or specific days).
+      Use for queries like:
+      - "weekends vs weekdays"
+      - "Fridays vs Saturdays"
+      - "weekend performance"
+      - "Monday sales vs Friday sales"
+    parameters:
+      type: object
+      required:
+        - startDate
+        - endDate
+        - comparison
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+        comparison:
+          type: string
+          description: |
+            Type of day comparison. Examples:
+            - "weekday_vs_weekend"
+            - "friday_vs_saturday"
+            - "monday_vs_friday"
+          example: "weekday_vs_weekend"
+        category:
+          type: string
+          description: Optional category filter (e.g., "(Beer)", "(Sushi)")
+          example: "(Beer)"
+    examples:
+      - query: "Compare weekday and weekend sales in May"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          comparison: "weekday_vs_weekend"
+      - query: "Friday vs Saturday beer sales"
+        args:
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+          comparison: "friday_vs_saturday"
+          category: "(Beer)"
+
+  - name: track_item_performance
+    description: |
+      Track performance of a specific item over time. Use for queries like:
+      - "how is Salmon Roll selling"
+      - "track Spicy Tuna sales"
+      - "Edamame performance over time"
+      - "California Roll sales trend"
+    parameters:
+      type: object
+      required:
+        - itemName
+        - startDate
+        - endDate
+      properties:
+        itemName:
+          type: string
+          description: Name of the item to track (e.g., "Salmon Roll", "Spicy Tuna", "Edamame")
+          example: "Salmon Roll"
+        startDate:
+          type: string
+          format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate:
+          type: string
+          format: date
+          description: End date in YYYY-MM-DD format
+          example: "2025-05-31"
+    examples:
+      - query: "How is Salmon Roll selling this month?"
+        args:
+          itemName: "Salmon Roll"
+          startDate: "2025-05-01"
+          endDate: "2025-05-31"
+      - query: "Track Spicy Tuna sales from May to June"
+        args:
+          itemName: "Spicy Tuna"
+          startDate: "2025-05-01"
+          endDate: "2025-06-30"
+
+  - name: compare_periods
+    description: |
+      Compare sales between two separate time periods (months, weeks, or custom date ranges)
+      for overall sales, categories, or specific items. Use for queries like:
+      - "compare May and June"
+      - "May vs June"
+      - "this month vs last month"
+      - "Q1 vs Q2"
+      - "salmon roll sales May vs June"
+    parameters:
+      type: object
+      required:
+        - startDate1
+        - endDate1
+        - startDate2
+        - endDate2
+      properties:
+        startDate1:
+          type: string
+          format: date
+          description: Start date of first period in YYYY-MM-DD format
+          example: "2025-05-01"
+        endDate1:
+          type: string
+          format: date
+          description: End date of first period in YYYY-MM-DD format
+          example: "2025-05-31"
+        startDate2:
+          type: string
+          format: date
+          description: Start date of second period in YYYY-MM-DD format
+          example: "2025-06-01"
+        endDate2:
+          type: string
+          format: date
+          description: End date of second period in YYYY-MM-DD format
+          example: "2025-06-30"
+        category:
+          type: string
+          description: |
+            Optional category filter. Examples:
+            - "(Sushi)", "(Beer)", "(Food)"
+            - "Bottle Beer", "Signature Rolls"
+          example: "(Sushi)"
+        itemName:
+          type: string
+          description: |
+            Optional specific item name to compare across periods.
+            Examples: "Salmon Roll", "Spicy Tuna", "Edamame"
+          example: "Salmon Roll"
+    examples:
+      - query: "Compare May and June sales"
+        args:
+          startDate1: "2025-05-01"
+          endDate1: "2025-05-31"
+          startDate2: "2025-06-01"
+          endDate2: "2025-06-30"
+      - query: "Salmon Roll sales in May vs June"
+        args:
+          startDate1: "2025-05-01"
+          endDate1: "2025-05-31"
+          startDate2: "2025-06-01"
+          endDate2: "2025-06-30"
+          itemName: "Salmon Roll"
+      - query: "Compare sushi sales Q1 vs Q2"
+        args:
+          startDate1: "2025-01-01"
+          endDate1: "2025-03-31"
+          startDate2: "2025-04-01"
+          endDate2: "2025-06-30"
+          category: "(Sushi)"
+
+# ============================================================================
+# USAGE NOTES FOR VERTEX AI AGENT BUILDER
+# ============================================================================
+#
+# 1. Service Account Configuration:
+#    - Use: vtx-agent-fds-tool-invoker@fdsanalytics.iam.gserviceaccount.com
+#    - This account has IAM permission to invoke the Tool Server
+#
+# 2. Request Format:
+#    All requests to /execute-tool must include:
+#    {
+#      "tool_name": "<function_name>",
+#      "tenant_id": "<tenant_identifier>",  # e.g., "senso-sushi"
+#      "args": { <function-specific parameters> }
+#    }
+#
+# 3. Date Format:
+#    All dates must be in YYYY-MM-DD format (e.g., "2025-05-01")
+#
+# 4. Category Names:
+#    - Primary categories have parentheses: (Beer), (Sushi), (Food), (Liquor), (Wine)
+#    - Subcategories have no parentheses: Bottle Beer, Draft Beer, Signature Rolls
+#
+# 5. Response Format:
+#    Successful responses return:
+#    {
+#      "status": "success",
+#      "data": [ array of results ],
+#      "chartUrl": "https://..." (optional),
+#      "metadata": { "tool_name": "...", "row_count": N, ... }
+#    }
+#
+# 6. Performance:
+#    - Fast path (insights cache): 100-200ms
+#    - Slow path (stored procedures): 300-800ms
+#
+# 7. Testing:
+#    Test all functions with: ./scripts/testing/test-tool-server.sh
+#
+# ============================================================================
