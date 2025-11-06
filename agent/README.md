@@ -111,6 +111,178 @@ STAGING_BUCKET=gs://fdsanalytics-agent-staging
 AGENT_DISPLAY_NAME=FDS Analytics Agent
 ```
 
+## Blue/Green Deployment
+
+**Important:** ADK agents (ReasoningEngines) do NOT support Cloud Run-style revisions or traffic splitting. Each deployment creates a new resource.
+
+### Why Blue/Green?
+
+Unlike Cloud Run, you cannot:
+- ❌ Roll back to previous revision with one click
+- ❌ Split traffic between versions (0%/100%, 50%/50%, etc.)
+- ❌ Gradually migrate users to new version
+
+Instead, use Blue/Green deployment for safe rollback:
+- ✅ Deploy new version alongside old
+- ✅ Test new version thoroughly before switching
+- ✅ Keep old version running for instant rollback
+- ✅ Delete old version only when confident
+
+### Workflow
+
+**Step 1: List Current Agents**
+
+```bash
+./scripts/deploy/list-agents.sh
+```
+
+Shows all deployed agents with their resource names.
+
+**Step 2: Deploy New Version**
+
+```bash
+# Deploy v2 alongside existing v1
+AGENT_DISPLAY_NAME="FDS Analytics Agent v2" ./scripts/deploy/deploy-agent.sh
+```
+
+This creates a NEW agent resource with a different name. The original agent continues running.
+
+**Step 3: Test New Version**
+
+```bash
+# Get v2 resource name from output or .agent_resource file
+V2_RESOURCE=$(cat agent/.agent_resource)
+
+# Test v2 thoroughly
+python test_agent.py --resource "$V2_RESOURCE"
+
+# Test with real queries
+python -c "
+from vertexai import agent_engines
+import vertexai
+import asyncio
+
+vertexai.init(project='fdsanalytics', location='us-central1')
+app = agent_engines.get('$V2_RESOURCE')
+
+async def test():
+    session = await app.async_create_session(user_id='test')
+    async for event in app.async_stream_query(
+        user_id='test',
+        session_id=session['id'],
+        message='Show me daily sales for May 2025'
+    ):
+        print(event.text, end='')
+    print()
+
+asyncio.run(test())
+"
+```
+
+**Step 4: Decision Point**
+
+**If v2 is GOOD:**
+
+```bash
+# Update your UI/application to use v2 resource name
+# (Update environment variables, config files, etc.)
+
+# List agents to confirm v1 resource name
+./scripts/deploy/list-agents.sh
+
+# Delete old v1
+./scripts/deploy/delete-agent.sh <v1-resource-name>
+```
+
+**If v2 is BAD:**
+
+```bash
+# Keep using v1 (no changes to UI/application)
+
+# Delete failed v2
+./scripts/deploy/delete-agent.sh <v2-resource-name>
+
+# v1 continues serving traffic - zero downtime!
+```
+
+### Naming Conventions
+
+Use semantic versioning or date-based naming:
+
+```bash
+# Semantic versioning
+AGENT_DISPLAY_NAME="FDS Analytics Agent v1.0.0"
+AGENT_DISPLAY_NAME="FDS Analytics Agent v1.1.0"
+AGENT_DISPLAY_NAME="FDS Analytics Agent v2.0.0"
+
+# Date-based
+AGENT_DISPLAY_NAME="FDS Analytics Agent 2025-11-05"
+AGENT_DISPLAY_NAME="FDS Analytics Agent 2025-11-06"
+
+# Feature-based
+AGENT_DISPLAY_NAME="FDS Analytics Agent (Canary)"
+AGENT_DISPLAY_NAME="FDS Analytics Agent (Prod)"
+```
+
+### Helper Scripts
+
+**List all agents:**
+```bash
+./scripts/deploy/list-agents.sh
+
+# Filter by pattern
+./scripts/deploy/list-agents.sh "v2"
+```
+
+**Delete an agent:**
+```bash
+# With confirmation prompt
+./scripts/deploy/delete-agent.sh <resource-name>
+
+# Force delete (no prompt)
+./scripts/deploy/delete-agent.sh --force <resource-name>
+
+# Delete tracked agent
+./scripts/deploy/delete-agent.sh  # Uses .agent_resource
+```
+
+### Complete Example
+
+```bash
+# Current state: "FDS Analytics Agent v1" is live
+
+# 1. Deploy v2
+echo "Deploying v2..."
+AGENT_DISPLAY_NAME="FDS Analytics Agent v2" ./scripts/deploy/deploy-agent.sh
+V2_RESOURCE=$(cat agent/.agent_resource)
+echo "v2 deployed: $V2_RESOURCE"
+
+# 2. Test v2
+echo "Testing v2..."
+python test_agent.py --resource "$V2_RESOURCE"
+
+# 3. If tests pass, update application to use v2
+echo "Tests passed! Update application config with: $V2_RESOURCE"
+
+# 4. Verify v2 in production, then delete v1
+sleep 300  # Wait 5 minutes to monitor
+echo "Deleting v1..."
+./scripts/deploy/list-agents.sh  # Find v1 resource name
+./scripts/deploy/delete-agent.sh <v1-resource-name>
+
+echo "Migration complete! v2 is now the only version running."
+```
+
+### Rollback Procedure
+
+If you discover an issue with the new version after switching:
+
+1. **Immediate:** Update application config to use old resource name
+2. **Optional:** Redeploy old version with same code (from git)
+3. **Cleanup:** Delete bad version after confirming rollback
+
+This is why keeping the old version running for a grace period is recommended.
+
 ## Testing
 
 ### Automated Test Suite

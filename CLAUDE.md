@@ -98,6 +98,31 @@ Node.js Tool Server (Unchanged)
 cd agent && python test_agent.py
 ```
 
+**Blue/Green Deployment:**
+ADK agents don't support Cloud Run-style revisions. Use Blue/Green for safe rollback:
+
+```bash
+# List current agents
+./scripts/deploy/list-agents.sh
+
+# Deploy v2 alongside v1
+AGENT_DISPLAY_NAME="FDS Analytics Agent v2" ./scripts/deploy/deploy-agent.sh
+
+# Test v2
+python test_agent.py --resource <v2-resource>
+
+# If good: Update app config to use v2, delete v1
+./scripts/deploy/delete-agent.sh <v1-resource>
+
+# If bad: Keep using v1, delete v2
+./scripts/deploy/delete-agent.sh <v2-resource>
+```
+
+**Helper Scripts:**
+- `./scripts/deploy/list-agents.sh` - List all deployed agents
+- `./scripts/deploy/delete-agent.sh` - Delete agent with confirmation
+- `./scripts/deploy/delete-agent.sh --force` - Force delete without prompt
+
 ## Common Development Commands
 
 ### Local Development

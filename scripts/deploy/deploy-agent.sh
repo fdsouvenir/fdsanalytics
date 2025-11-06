@@ -9,14 +9,33 @@
 # Prerequisites:
 #   - Run setup-agent-infrastructure.sh first (one-time)
 #   - Python 3.9+ installed
-#   - Agent dependencies installed: cd agent && pip install -r requirements.txt
+#   - Agent dependencies (auto-installed if missing)
 #
 # Usage:
+#   # Deploy with default name (overwrites existing)
 #   ./scripts/deploy/deploy-agent.sh
+#
+#   # Blue/Green: Deploy new version alongside existing
+#   AGENT_DISPLAY_NAME="FDS Analytics Agent v2" ./scripts/deploy/deploy-agent.sh
+#
+#   # Deploy for testing
+#   AGENT_DISPLAY_NAME="FDS Analytics Agent (Test)" ./scripts/deploy/deploy-agent.sh
 #
 # Environment Variables:
 #   PROJECT_ID (default: fdsanalytics)
 #   REGION (default: us-central1)
+#   STAGING_BUCKET (default: gs://fdsanalytics-agent-staging)
+#   AGENT_DISPLAY_NAME (default: "FDS Analytics Agent")
+#
+# Blue/Green Deployment Workflow:
+#   1. List existing: ./scripts/deploy/list-agents.sh
+#   2. Deploy v2:     AGENT_DISPLAY_NAME="Agent v2" ./scripts/deploy/deploy-agent.sh
+#   3. Test v2:       python agent/test_agent.py --resource <v2-resource>
+#   4. If good:       ./scripts/deploy/delete-agent.sh <v1-resource>
+#      If bad:        ./scripts/deploy/delete-agent.sh <v2-resource>
+#
+# Note: ADK agents don't have Cloud Run-style revisions. Each deployment
+#       creates a new ReasoningEngine resource. Use Blue/Green for safe rollback.
 ##############################################################################
 
 set -e  # Exit on error
@@ -26,6 +45,7 @@ PROJECT_ID="${PROJECT_ID:-fdsanalytics}"
 REGION="${REGION:-us-central1}"
 STAGING_BUCKET="gs://${PROJECT_ID}-agent-staging"
 AGENT_DIR="$(cd "$(dirname "$0")/../.." && pwd)/agent"
+AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-FDS Analytics Agent}"
 
 echo "============================================================"
 echo "FDS Analytics - Agent Deployment"
@@ -34,6 +54,7 @@ echo "Project ID:      $PROJECT_ID"
 echo "Region:          $REGION"
 echo "Staging Bucket:  $STAGING_BUCKET"
 echo "Agent Directory: $AGENT_DIR"
+echo "Agent Name:      $AGENT_DISPLAY_NAME"
 echo "============================================================"
 echo ""
 

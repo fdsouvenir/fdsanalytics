@@ -108,17 +108,9 @@ else
     echo "  ⚠ Warning: Could not grant Tool Server permissions (may already exist)"
 fi
 
-# Grant Extension Service Agent permission to impersonate Tool Server SA
-echo "  [5c] Granting Service Account Token Creator role..."
-if gcloud iam service-accounts add-iam-policy-binding "$TOOL_SERVER_SA" \
-    --member="serviceAccount:${EXTENSION_SA}" \
-    --role="roles/iam.serviceAccountTokenCreator" \
-    --project="$PROJECT_ID" \
-    >/dev/null 2>&1; then
-    echo "  ✓ Token creator permissions granted"
-else
-    echo "  ⚠ Warning: Could not grant token creator permissions (may already exist)"
-fi
+# Note: Token Creator role (serviceAccountTokenCreator) is NOT needed
+# Extension SA can invoke Tool Server directly via roles/run.invoker above
+# No service account impersonation required for this architecture
 
 echo "✓ IAM configuration complete"
 echo ""
